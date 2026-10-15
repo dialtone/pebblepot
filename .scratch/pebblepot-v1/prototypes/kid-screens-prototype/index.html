@@ -1,0 +1,679 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Answers "What do the kid-facing screens look like for a 4- and 6-year-old?"
+  Three structurally different variants on one page, switched with ?variant=A|B|C (or ← → keys / bottom bar).
+    A  Me first      pick a kid, then a personal dashboard with a jar and icon tabs
+    B  Family board  no picking first; every tile has a button per kid, both pots always visible
+    C  Step by step  a guided Who → What → 🎉 flow with a dot-frame pot and a reward goal
+  State is in memory only. Kids, chores and values are placeholders.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pebblepot — kid screens PROTOTYPE</title>
+<style>
+  :root {
+    --bg: #fdf8ef; --ink: #2d2a26; --muted: #8a8378; --card: #fff; --line: #ece4d6;
+    --good: #22a06b; --lock: #c9c2b6; --accent: #7c5cff;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif; }
+  body { padding-bottom: 90px; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+  input { font: inherit; }
+  h1, h2, h3 { margin: 0; }
+  .muted { color: var(--muted); }
+
+  /* pebbles */
+  .peb { display: inline-block; width: 14px; height: 12px; border-radius: 50% 55% 45% 50%;
+    box-shadow: inset -2px -2px 0 rgba(0,0,0,.15); margin: 1px; vertical-align: middle; }
+  .peb.hollow { background: transparent !important; box-shadow: inset 0 0 0 2px var(--lock); }
+  .dots { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 1px; }
+
+  /* jar */
+  .jar { position: relative; width: 100%; max-width: 260px; aspect-ratio: 3/4; margin: 0 auto;
+    border: 6px solid #cfe3ea; border-top-width: 0; border-radius: 22px 22px 46px 46px;
+    background: linear-gradient(90deg, rgba(255,255,255,.7), rgba(225,240,245,.5));
+    display: flex; flex-direction: row; flex-wrap: wrap-reverse; align-content: flex-start;
+    padding: 10px; overflow: hidden; }
+  .jar::before { content: ""; position: absolute; top: -14px; left: -6px; right: -6px; height: 14px;
+    background: #b9d3dc; border-radius: 8px; }
+  .jar .peb { width: var(--ps, 22px); height: calc(var(--ps, 22px) * .85); margin: 1px; }
+  .jar-num { text-align: center; font-size: 44px; font-weight: 800; margin-top: 8px; }
+  .jar-num small { font-size: 18px; font-weight: 600; color: var(--muted); }
+
+  /* tiles */
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .tile { position: relative; background: var(--card); border-radius: 22px; padding: 14px 10px;
+    box-shadow: 0 2px 0 var(--line), 0 6px 18px rgba(80,60,20,.06);
+    display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 150px; justify-content: center; }
+  .tile:active { transform: scale(.96); }
+  .tile .em { font-size: 64px; line-height: 1; }
+  .tile .lbl { font-size: 17px; font-weight: 700; text-align: center; }
+  .tile.done { background: #e9f8f0; }
+  .tile.done::after { content: "✓"; position: absolute; top: 8px; right: 12px; font-size: 34px; color: var(--good); font-weight: 900; }
+  .tile.locked { opacity: .55; filter: grayscale(.8); }
+  .tile .lockline { font-size: 14px; font-weight: 700; color: var(--muted); }
+  .bar { width: 80%; height: 8px; background: var(--line); border-radius: 8px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+
+  .avatar { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%;
+    background: var(--c); color: #fff; font-size: 34px; width: 64px; height: 64px; flex: none;
+    box-shadow: 0 3px 0 rgba(0,0,0,.12); }
+  .bigbtn { background: var(--card); border-radius: 26px; padding: 20px 24px; font-size: 24px; font-weight: 800;
+    box-shadow: 0 3px 0 var(--line), 0 6px 18px rgba(80,60,20,.08); display: flex; align-items: center; gap: 14px; }
+  .bigbtn:active { transform: scale(.97); }
+  .pill { background: var(--card); border-radius: 999px; padding: 10px 18px; font-weight: 700; box-shadow: 0 2px 0 var(--line); }
+  .pill.on { background: var(--ink); color: #fff; }
+  .search { width: 100%; font-size: 20px; padding: 14px 18px; border-radius: 16px; border: 2px solid var(--line); background: #fff; }
+
+  /* sheet */
+  .sheet-bg { position: fixed; inset: 0; background: rgba(40,30,10,.35); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
+  .sheet { background: var(--bg); width: 100%; max-width: 900px; max-height: 88vh; overflow: auto;
+    border-radius: 28px 28px 0 0; padding: 22px 22px 110px; }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 12px; }
+  .x { font-size: 30px; width: 54px; height: 54px; border-radius: 50%; background: var(--card); box-shadow: 0 2px 0 var(--line); }
+
+  /* toast */
+  #toast { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); z-index: 40;
+    background: var(--ink); color: #fff; border-radius: 20px; padding: 14px 16px 14px 22px; font-size: 20px; font-weight: 700;
+    display: none; align-items: center; gap: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.25); max-width: calc(100vw - 24px); }
+  #toast.show { display: flex; }
+  #toast button { background: #fff; color: var(--ink); border-radius: 14px; padding: 10px 16px; font-weight: 800; }
+
+  /* prototype chrome */
+  #proto { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 50;
+    background: #111; color: #fff; border-radius: 999px; padding: 6px; display: flex; align-items: center; gap: 4px;
+    font: 600 14px system-ui, sans-serif; box-shadow: 0 8px 24px rgba(0,0,0,.35); border: 2px dashed #ffd400; }
+  #proto button { color: #fff; padding: 8px 12px; border-radius: 999px; }
+  #proto button:hover { background: #333; }
+  #proto .lab { padding: 0 8px; white-space: nowrap; }
+  #state { position: fixed; right: 10px; top: 10px; z-index: 45; width: 340px; max-height: 70vh; overflow: auto;
+    background: #111; color: #e8e8e8; font: 12px/1.45 ui-monospace, Menlo, monospace; padding: 12px; border-radius: 12px;
+    border: 2px dashed #ffd400; display: none; }
+  #state.show { display: block; }
+  #state .struck { text-decoration: line-through; opacity: .5; }
+  #state button { color: #111; background: #ffd400; border-radius: 6px; padding: 4px 8px; font: 600 12px system-ui; margin: 6px 6px 0 0; }
+
+  /* ---------- Variant A ---------- */
+  .A-wrap { max-width: 1180px; margin: 0 auto; padding: 18px; }
+  .A-pick { min-height: 80vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; }
+  .A-pick h1 { font-size: 40px; }
+  .A-pick .row { display: flex; gap: 28px; flex-wrap: wrap; justify-content: center; }
+  .A-kid { background: var(--card); border-radius: 32px; padding: 28px 40px; display: flex; flex-direction: column; align-items: center; gap: 10px;
+    box-shadow: 0 4px 0 var(--line), 0 10px 30px rgba(80,60,20,.08); min-width: 220px; }
+  .A-kid .avatar { width: 140px; height: 140px; font-size: 80px; }
+  .A-kid b { font-size: 32px; }
+  .A-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+  .A-head h2 { font-size: 30px; }
+  .A-body { display: grid; grid-template-columns: 280px 1fr; gap: 24px; align-items: start; }
+  .A-tabs { position: sticky; bottom: 80px; display: flex; justify-content: center; gap: 12px; margin-top: 22px; }
+  .A-tab { background: var(--card); border-radius: 22px; padding: 12px 22px; font-size: 18px; font-weight: 800;
+    display: flex; flex-direction: column; align-items: center; box-shadow: 0 3px 0 var(--line); min-width: 110px; }
+  .A-tab .em { font-size: 36px; }
+  .A-tab.on { background: var(--ink); color: #fff; }
+  .A-section-title { font-size: 22px; font-weight: 800; margin: 4px 0 12px; }
+  @media (max-width: 900px) and (orientation: portrait), (max-width: 700px) {
+    .A-body { grid-template-columns: 1fr; }
+    .A-potcol { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 14px; }
+    .A-potcol .jar { max-width: 120px; }
+    .A-potcol .jar-num { text-align: left; }
+  }
+
+  /* ---------- Variant B ---------- */
+  .B-wrap { max-width: 1180px; margin: 0 auto; padding: 16px; }
+  .B-pots { display: flex; gap: 14px; position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 8px 0 12px; }
+  .B-pot { flex: 1; background: var(--card); border-radius: 22px; padding: 12px 16px; display: flex; align-items: center; gap: 14px;
+    box-shadow: 0 2px 0 var(--line); }
+  .B-pot .num { font-size: 40px; font-weight: 900; margin-left: auto; }
+  .B-pot .mini { display: flex; flex-wrap: wrap; max-width: 220px; }
+  .B-pots { flex-wrap: wrap; }
+  .B-pot { min-width: 200px; text-align: left; }
+  .B-name { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 15px; }
+  .badge { position: absolute; top: -10px; right: -10px; background: var(--ink); color: #fff; font: 800 16px system-ui; min-width: 32px; height: 32px;
+    border-radius: 16px; display: flex; align-items: center; justify-content: center; padding: 0 6px; border: 3px solid #fff; z-index: 2; }
+  .badge::after { content: "−"; position: absolute; left: -9px; top: 50%; transform: translateY(-50%); background: #fff; color: var(--ink);
+    border-radius: 50%; width: 16px; height: 16px; font-size: 14px; line-height: 15px; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+  .B-who button { position: relative; }
+  .today-row { display: flex; align-items: center; gap: 14px; background: var(--card); border-radius: 18px; padding: 10px 14px; margin-bottom: 8px; box-shadow: 0 2px 0 var(--line); }
+  .today-row .em { font-size: 36px; }
+  .today-row.struck { opacity: .45; text-decoration: line-through; }
+  .B-pot .avatar { width: 52px; height: 52px; font-size: 28px; }
+  .B-pot .num { font-size: 32px; }
+  .B-who { gap: 6px; }
+  .B-who .avatar { width: 54px; height: 54px; font-size: 27px; }
+  .B-h { display: flex; align-items: center; justify-content: space-between; margin: 18px 4px 10px; }
+  .B-h h2 { font-size: 24px; }
+  .B-rows { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  @media (orientation: landscape) and (min-width: 900px) { .B-rows { grid-template-columns: 1fr 1fr; } }
+  .B-row { background: var(--card); border-radius: 20px; padding: 10px 14px; display: flex; align-items: center; gap: 14px; box-shadow: 0 2px 0 var(--line); }
+  .B-row .em { font-size: 48px; width: 60px; text-align: center; }
+  .B-row .txt { flex: 1; min-width: 0; }
+  .B-row .txt b { display: block; font-size: 19px; }
+  .B-who { display: flex; gap: 10px; }
+  .B-who .avatar { width: 60px; height: 60px; font-size: 30px; position: relative; }
+  .B-who .avatar.done { background: #e9f8f0 !important; color: var(--good); font-weight: 900; box-shadow: inset 0 0 0 3px var(--good); }
+  .B-kidtabs { display: flex; gap: 10px; margin-bottom: 14px; }
+
+  /* ---------- Variant C ---------- */
+  .C-wrap { max-width: 1000px; margin: 0 auto; padding: 18px; min-height: 85vh; display: flex; flex-direction: column; }
+  .C-top { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+  .C-back { font-size: 30px; width: 64px; height: 64px; border-radius: 50%; background: var(--card); box-shadow: 0 3px 0 var(--line); }
+  .C-who { flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; align-content: center; }
+  .C-who button { background: var(--card); border-radius: 36px; padding: 30px; display: flex; flex-direction: column; align-items: center; gap: 14px;
+    box-shadow: 0 4px 0 var(--line); }
+  .C-who .avatar { width: 160px; height: 160px; font-size: 96px; }
+  .C-frames { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .C-frame { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; background: #fff; padding: 6px; border-radius: 12px; box-shadow: 0 2px 0 var(--line); }
+  .C-frame .peb { width: 26px; height: 24px; margin: 0; }
+  .C-frame .peb:nth-child(5) { margin-right: 8px; }
+  .C-goal { display: flex; align-items: center; gap: 14px; background: var(--card); border-radius: 22px; padding: 12px 18px; margin: 16px auto; box-shadow: 0 2px 0 var(--line); }
+  .C-goal .em { font-size: 54px; }
+  .C-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: auto; }
+  .C-actions .bigbtn { flex-direction: column; font-size: 26px; padding: 26px; }
+  .C-actions .bigbtn .em { font-size: 72px; }
+  .C-pager { display: flex; justify-content: center; gap: 16px; margin-top: 16px; }
+  .C-pager button { font-size: 34px; width: 76px; height: 76px; border-radius: 50%; background: var(--card); box-shadow: 0 3px 0 var(--line); }
+  .C-pager button:disabled { opacity: .3; }
+  .C-yay { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; }
+  .C-yay .em { font-size: 120px; animation: pop .5s ease-out; }
+  .C-yay h1 { font-size: 46px; }
+  .C-yay .dots .peb { width: 34px; height: 30px; animation: drop .6s ease-in backwards; }
+  .C-confirm { display: flex; gap: 20px; justify-content: center; }
+  .C-confirm button { font-size: 54px; width: 140px; height: 140px; border-radius: 40px; box-shadow: 0 4px 0 rgba(0,0,0,.12); }
+  @keyframes pop { from { transform: scale(.3); } 70% { transform: scale(1.15); } to { transform: scale(1); } }
+  @keyframes drop { from { transform: translateY(-120px); opacity: 0; } to { transform: none; opacity: 1; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast"></div>
+<div id="state"></div>
+<div id="proto"></div>
+
+<script>
+// ---------------------------------------------------------------- data (placeholders)
+const KIDS = [
+  { id: 'ada', name: 'Ada', age: 6, emoji: '🦊', color: '#f59e0b' },
+  { id: 'ben', name: 'Ben', age: 4, emoji: '🐻', color: '#3b82f6' },
+  { id: 'mom', name: 'Mom', emoji: '🦉', color: '#db2777', parent: true },
+  { id: 'dad', name: 'Dad', emoji: '🐢', color: '#16a34a', parent: true },
+];
+const DAILY = [
+  { id: 'bed', label: 'Make bed', emoji: '🛏️', value: 2 },
+  { id: 'teeth', label: 'Brush teeth', emoji: '🪥', value: 1 },
+  { id: 'dress', label: 'Get dressed', emoji: '👕', value: 1 },
+  { id: 'toys', label: 'Tidy toys', emoji: '🧸', value: 2 },
+  { id: 'plate', label: 'Clear plate', emoji: '🍽️', value: 1 },
+  { id: 'cat', label: 'Feed the cat', emoji: '🐱', value: 2 },
+];
+const OCCASIONAL = [
+  { id: 'plants', label: 'Water plants', emoji: '🪴', value: 3, cat: 'outside' },
+  { id: 'laundry', label: 'Help with laundry', emoji: '🧺', value: 3, cat: 'inside' },
+  { id: 'car', label: 'Wash the car', emoji: '🚗', value: 5, cat: 'outside' },
+  { id: 'sweep', label: 'Sweep the floor', emoji: '🧹', value: 3, cat: 'inside' },
+  { id: 'table', label: 'Set the table', emoji: '🍴', value: 2, cat: 'kitchen' },
+  { id: 'cook', label: 'Help cook', emoji: '🍳', value: 3, cat: 'kitchen' },
+  { id: 'leaves', label: 'Pick up leaves', emoji: '🍂', value: 4, cat: 'outside' },
+  { id: 'recycle', label: 'Sort recycling', emoji: '♻️', value: 2, cat: 'kitchen' },
+  { id: 'sink', label: 'Clean the sink', emoji: '🧼', value: 3, cat: 'inside' },
+  { id: 'shop', label: 'Carry shopping', emoji: '🛍️', value: 2, cat: 'outside' },
+  { id: 'shoes', label: 'Tidy shoes', emoji: '👟', value: 1, cat: 'inside' },
+  { id: 'dust', label: 'Dust shelves', emoji: '🪶', value: 2, cat: 'inside' },
+];
+const CATS = [['all', '✨'], ['inside', '🏠'], ['kitchen', '🍳'], ['outside', '🌳']];
+const DEEDS = [
+  { id: 'share', label: 'Shared nicely', emoji: '🤝', value: 2 },
+  { id: 'help', label: 'Helped sibling', emoji: '🫶', value: 2 },
+  { id: 'sorry', label: 'Said sorry', emoji: '💬', value: 1 },
+  { id: 'kind', label: 'Kind words', emoji: '💛', value: 1 },
+  { id: 'brave', label: 'Was brave', emoji: '🦁', value: 2 },
+  { id: 'listen', label: 'Listened first time', emoji: '👂', value: 1 },
+];
+const REWARDS = [
+  { id: 'sticker', label: 'Sticker', emoji: '⭐', price: 5 },
+  { id: 'story', label: 'Extra story', emoji: '📖', price: 8 },
+  { id: 'dessert', label: 'Pick dessert', emoji: '🍦', price: 10 },
+  { id: 'park', label: 'Park trip', emoji: '🛝', price: 15 },
+  { id: 'movie', label: 'Movie night', emoji: '🎬', price: 30 },
+  { id: 'toy', label: 'Small toy', emoji: '🪀', price: 40 },
+  { id: 'dayout', label: 'Day out', emoji: '🎡', price: 60 },
+];
+const PEB_COLORS = ['#f4a261', '#e76f51', '#8ecae6', '#90be6d', '#c77dff', '#f9c74f', '#ff8fab', '#76c7c0'];
+
+// ---------------------------------------------------------------- domain state (the bit the real app keeps)
+let day = 0;              // simulated day number; "Next day" bumps it
+let seq = 0;
+let log = [];             // { id, kid, kind: 'chore'|'deed'|'reward', item, label, emoji, amount, note, day, struck }
+function seed() {
+  day = 0; seq = 0; log = [];
+  add('ada', 'chore', 'car', 'Wash the car', '🚗', 5, null, -3);
+  add('ada', 'chore', 'leaves', 'Pick up leaves', '🍂', 4, null, -2);
+  add('ada', 'deed', 'help', 'Helped sibling', '🫶', 2, null, -2);
+  add('ada', 'chore', 'laundry', 'Help with laundry', '🧺', 3, null, -1);
+  add('ada', 'chore', 'cook', 'Help cook', '🍳', 3, null, -1);
+  add('ada', 'chore', 'table', 'Set the table', '🍴', 2, null, -1);
+  add('ada', 'deed', 'brave', 'Was brave', '🦁', 2, null, -1);
+  add('ada', 'chore', 'sweep', 'Sweep the floor', '🧹', 3, null, -1);
+  add('ada', 'reward', 'sticker', 'Sticker', '⭐', -5, null, -1);
+  add('ada', 'chore', 'sink', 'Clean the sink', '🧼', 3, null, -1);
+  add('ada', 'chore', 'plants', 'Water plants', '🪴', 3, null, -1);
+  add('ben', 'chore', 'toys', 'Tidy toys', '🧸', 2, null, -2);
+  add('ben', 'deed', 'share', 'Shared nicely', '🤝', 2, null, -1);
+  add('ben', 'chore', 'shoes', 'Tidy shoes', '👟', 1, null, -1);
+  add('ben', 'chore', 'cat', 'Feed the cat', '🐱', 2, null, -1);
+  add('ben', 'deed', 'listen', 'Listened first time', '👂', 1, null, -1);
+  add('ben', 'chore', 'bed', 'Make bed', '🛏️', 2, null, 0);
+  add('mom', 'chore', 'laundry', 'Help with laundry', '🧺', 3, null, -1);
+  add('dad', 'chore', 'car', 'Wash the car', '🚗', 5, null, -2);
+  add('dad', 'deed', 'sorry', 'Said sorry', '💬', 1, null, -1);
+}
+function add(kid, kind, item, label, emoji, amount, note, d = day) {
+  const e = { id: ++seq, kid, kind, item, label, emoji, amount, note, day: d, struck: false };
+  log.push(e); return e;
+}
+const pot = kid => log.filter(e => e.kid === kid && !e.struck).reduce((s, e) => s + e.amount, 0);
+const doneToday = (kid, chore) => log.some(e => e.kid === kid && e.kind === 'chore' && e.item === chore && e.day === day && !e.struck);
+const isDaily = id => DAILY.some(c => c.id === id);
+const countToday = (kid, item) => log.filter(e => e.kid === kid && e.item === item && e.day === day && !e.struck).length;
+let lastTap = { key: null, at: 0 };
+
+// actions — each returns the log entry or a refusal string
+function earnChore(kid, c) {
+  if (doneToday(kid, c.id)) return 'already';  // every chore, daily or occasional, once per person per day
+  return add(kid, 'chore', c.id, c.label, c.emoji, c.value, null);
+}
+function earnDeed(kid, d) { return add(kid, 'deed', d.id, d.label, d.emoji, d.value, null); }
+function earnCustomDeed(kid, note, amount) { return add(kid, 'deed', 'custom', note || 'Something kind', '✨', amount, note); }
+function redeem(kid, r) {
+  if (pot(kid) < r.price) return 'short';
+  return add(kid, 'reward', r.id, r.label, r.emoji, -r.price, null);
+}
+function undo(entry) { entry.struck = true; render(); }
+
+// ---------------------------------------------------------------- helpers
+const kidById = id => KIDS.find(k => k.id === id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const peb = (i, hollow) => `<span class="peb${hollow ? ' hollow' : ''}" style="background:${PEB_COLORS[i % PEB_COLORS.length]}"></span>`;
+const dots = n => `<span class="dots">${Array.from({ length: n }, (_, i) => peb(i)).join('')}</span>`;
+const avatar = (k, extra = '', attrs = '') => `<span class="avatar ${extra}" style="--c:${k.color}" ${attrs}>${k.emoji}</span>`;
+function jar(n) {
+  const size = n > 120 ? 12 : n > 60 ? 16 : 22;
+  return `<div class="jar" style="--ps:${size}px">${Array.from({ length: Math.min(n, 300) }, (_, i) => peb(i * 7 + 3)).join('')}</div>`;
+}
+
+let toastTimer;
+function toast(text, entry) {
+  const t = document.getElementById('toast');
+  t.innerHTML = `<span>${text}</span>${entry ? '<button data-a="undo-toast">↩︎ Undo</button>' : ''}`;
+  t.classList.add('show');
+  t.onclick = ev => { if (ev.target.dataset.a === 'undo-toast') { undo(entry); t.classList.remove('show'); } };
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 5000);
+}
+function toastFor(result, kid, failMsg) {
+  if (typeof result === 'string') { toast(failMsg[result] || 'Nope'); return; }
+  const k = kidById(kid);
+  const sign = result.amount > 0 ? `+${result.amount}` : `${result.amount}`;
+  toast(`${k.emoji} ${result.emoji} ${sign}`, result);
+}
+
+// ---------------------------------------------------------------- UI state (per variant, reset on switch)
+let variant = new URLSearchParams(location.search).get('variant') || 'A';
+let ui = {};
+function resetUi() { ui = { kid: null, tab: 'chores', sheet: null, search: '', cat: 'all', note: '', amount: 2, step: 'who', page: 0, goal: {}, pending: null, showAll: false }; }
+
+// ================================================================ Variant A — Me first
+function VariantA() {
+  if (!ui.kid) {
+    return `<div class="A-wrap A-pick">
+      <h1>Who are you?</h1>
+      <div class="row">${KIDS.map(k => `
+        <button class="A-kid" data-a="A-pick" data-kid="${k.id}">
+          ${avatar(k)}<b>${k.name}</b><span class="muted">${pot(k.id)} pebbles</span>
+        </button>`).join('')}</div>
+    </div>`;
+  }
+  const k = kidById(ui.kid), p = pot(k.id);
+  let content = '';
+  if (ui.tab === 'chores') {
+    content = `<div class="A-section-title">Today</div>
+      <div class="grid">${DAILY.map(c => `
+        <button class="tile ${doneToday(k.id, c.id) ? 'done' : ''}" data-a="A-chore" data-id="${c.id}">
+          <span class="em">${c.emoji}</span><span class="lbl">${c.label}</span>${dots(c.value)}
+        </button>`).join('')}</div>
+      <div style="margin-top:20px;display:flex;justify-content:center">
+        <button class="bigbtn" data-a="A-more"><span style="font-size:40px">🔎</span> More jobs</button>
+      </div>`;
+  } else if (ui.tab === 'kind') {
+    content = `<div class="A-section-title">Something kind</div>
+      <div class="grid">${DEEDS.map(d => `
+        <button class="tile" data-a="A-deed" data-id="${d.id}"><span class="em">${d.emoji}</span><span class="lbl">${d.label}</span>${dots(d.value)}</button>`).join('')}
+        <button class="tile" data-a="A-custom"><span class="em">✏️</span><span class="lbl">Something else</span></button>
+      </div>`;
+  } else {
+    content = `<div class="A-section-title">Spend pebbles</div>
+      <div class="grid">${REWARDS.map(r => {
+        const short = r.price - p;
+        return `<button class="tile ${short > 0 ? 'locked' : ''}" data-a="A-reward" data-id="${r.id}">
+          <span class="em">${r.emoji}</span><span class="lbl">${r.label}</span>
+          <span style="font-weight:800">${r.price} <span class="peb" style="background:#f4a261"></span></span>
+          ${short > 0 ? `<div class="bar"><i style="width:${Math.round(100 * p / r.price)}%"></i></div><span class="lockline">🔒 ${short} more to go</span>` : ''}
+        </button>`;
+      }).join('')}</div>`;
+  }
+  const tabs = [['chores', '🧹', 'Jobs'], ['kind', '💛', 'Kind'], ['rewards', '🎁', 'Spend']];
+  return `<div class="A-wrap">
+    <div class="A-head">
+      <button data-a="A-switch" title="Switch kid">${avatar(k)}</button>
+      <h2>${k.name}'s pot</h2>
+      <span class="muted" style="margin-left:auto">tap your face to switch</span>
+    </div>
+    <div class="A-body">
+      <div class="A-potcol">${jar(p)}<div class="jar-num">${p}<br><small>pebbles</small></div></div>
+      <div>${content}</div>
+    </div>
+    <div class="A-tabs">${tabs.map(([id, em, l]) => `<button class="A-tab ${ui.tab === id ? 'on' : ''}" data-a="A-tab" data-id="${id}"><span class="em">${em}</span>${l}</button>`).join('')}</div>
+  </div>${ui.sheet === 'more' ? moreSheet('A-occ') : ''}${ui.sheet === 'custom' ? customSheet('A-custom-save', false) : ''}`;
+}
+
+// shared sheets (A and B)
+function moreSheet(action) {
+  const q = ui.search.trim().toLowerCase();
+  const list = OCCASIONAL.filter(c => (ui.cat === 'all' || c.cat === ui.cat) && (!q || c.label.toLowerCase().includes(q)));
+  return `<div class="sheet-bg" data-a="close"><div class="sheet" data-stop>
+    <div class="sheet-head"><h2>More jobs</h2><button class="x" data-a="close">✕</button></div>
+    <input class="search" id="search" placeholder="Search jobs…" value="${esc(ui.search)}" autocomplete="off">
+    <div style="display:flex;gap:10px;margin:14px 0">${CATS.map(([id, em]) => `<button class="pill ${ui.cat === id ? 'on' : ''}" data-a="cat" data-id="${id}" style="font-size:26px">${em}</button>`).join('')}</div>
+    <div class="grid">${list.map(c => `
+      <button class="tile" data-a="${action}" data-id="${c.id}"><span class="em">${c.emoji}</span><span class="lbl">${c.label}</span>${dots(c.value)}</button>`).join('') || '<p class="muted">No jobs match.</p>'}</div>
+  </div></div>`;
+}
+function customSheet(action, pickKid) {
+  return `<div class="sheet-bg" data-a="close"><div class="sheet" data-stop style="max-width:640px">
+    <div class="sheet-head"><h2>✏️ Something else kind</h2><button class="x" data-a="close">✕</button></div>
+    ${pickKid ? `<div class="B-kidtabs">${KIDS.map(k => `<button data-a="B-custom-kid" data-kid="${k.id}" style="opacity:${ui.kid === k.id ? 1 : .35}">${avatar(k)}</button>`).join('')}</div>` : ''}
+    <input class="search" id="note" placeholder="What happened? (a grown-up types)" value="${esc(ui.note)}" autocomplete="off">
+    <div style="display:flex;align-items:center;gap:18px;margin:20px 0">
+      <button class="x" data-a="amt" data-d="-1">−</button>
+      <div style="flex:1;text-align:center">${dots(ui.amount)}<div style="font-size:28px;font-weight:800">${ui.amount}</div></div>
+      <button class="x" data-a="amt" data-d="1">+</button>
+    </div>
+    <button class="bigbtn" style="width:100%;justify-content:center;background:var(--good);color:#fff" data-a="${action}">Give pebbles</button>
+  </div></div>`;
+}
+
+// ================================================================ Variant B — Family board
+function VariantB() {
+  const who = (kind, id, disabledFn) => `<div class="B-who">${KIDS.map(k => {
+    const done = disabledFn && disabledFn(k.id);
+    const n = kind === 'deed' ? countToday(k.id, id) : 0;
+    return `<button data-a="B-earn" data-kind="${kind}" data-id="${id}" data-kid="${k.id}">${done ? `<span class="avatar done" style="--c:${k.color}">✓</span>` : avatar(k)}${n ? `<span class="badge" data-a="B-dec" data-id="${id}" data-kid="${k.id}" title="tap to take one away">${n}</span>` : ''}</button>`;
+  }).join('')}</div>`;
+  const row = (it, kind, disabledFn) => `<div class="B-row"><span class="em">${it.emoji}</span>
+    <span class="txt"><b>${it.label}</b>${dots(it.value)}</span>${who(kind, it.id, disabledFn)}</div>`;
+  const q = ui.search.trim().toLowerCase();
+  const occ = q ? OCCASIONAL.filter(c => c.label.toLowerCase().includes(q)) : OCCASIONAL;
+  return `<div class="B-wrap">
+    <div class="B-pots">${KIDS.map(k => `<button class="B-pot" data-a="B-today" data-kid="${k.id}"><span class="B-name">${avatar(k)}<b>${k.name}</b></span><div class="mini">${dots(Math.min(pot(k.id), 20))}</div><span class="num">${pot(k.id)}</span></button>`).join('')}
+      <button class="bigbtn" data-a="B-shop" style="flex:none"><span style="font-size:40px">🎁</span> Spend</button></div>
+
+    <div class="B-h"><h2>☀️ Today's jobs</h2><span class="muted">tap who did it · tap ✓ to undo · tap a pot to see today</span></div>
+    <div class="B-rows">${DAILY.map(c => row(c, 'daily', kid => doneToday(kid, c.id))).join('')}</div>
+
+    <div class="B-h"><h2>💛 Kind things</h2><button class="pill" data-a="B-custom">✏️ Something else</button></div>
+    <div class="B-rows">${DEEDS.map(d => row(d, 'deed')).join('')}</div>
+
+    <div class="B-h"><h2>🧺 Other jobs</h2></div>
+    <input class="search" id="search" placeholder="Type to find a job… (wash, leaves, laundry)" value="${esc(ui.search)}" autocomplete="off">
+    <div class="B-rows" style="margin-top:10px">${occ.map(c => row(c, 'occ', kid => doneToday(kid, c.id))).join('') || '<p class="muted">No jobs match.</p>'}</div>
+  </div>
+  ${ui.sheet === 'shop' ? shopSheetB() : ''}${ui.sheet === 'today' ? todaySheetB() : ''}${ui.sheet === 'custom' ? customSheet('B-custom-save', true) : ''}`;
+}
+function todaySheetB() {
+  const k = kidById(ui.kid), today = log.filter(e => e.kid === k.id && e.day === day).reverse();
+  return `<div class="sheet-bg" data-a="close"><div class="sheet" data-stop style="max-width:640px">
+    <div class="sheet-head"><span class="B-name" style="flex-direction:row;gap:12px">${avatar(k)}<h2>${k.name}'s day · ${pot(k.id)} pebbles</h2></span><button class="x" data-a="close">✕</button></div>
+    ${today.map(e => `<div class="today-row ${e.struck ? 'struck' : ''}"><span class="em">${e.emoji}</span><b style="flex:1">${esc(e.label)}</b>
+      <b>${e.amount > 0 ? '+' : ''}${e.amount}</b>
+      <button class="pill" data-a="${e.struck ? 'B-unstrike' : 'B-strike'}" data-id="${e.id}">${e.struck ? '↩︎ Put back' : '✕ Undo'}</button></div>`).join('') || '<p class="muted">Nothing yet today.</p>'}
+  </div></div>`;
+}
+function shopSheetB() {
+  const k = kidById(ui.kid || KIDS[0].id), p = pot(k.id);
+  return `<div class="sheet-bg" data-a="close"><div class="sheet" data-stop>
+    <div class="sheet-head"><h2>🎁 Spend pebbles</h2><button class="x" data-a="close">✕</button></div>
+    <div class="B-kidtabs">${KIDS.map(kk => `<button class="pill ${kk.id === k.id ? 'on' : ''}" data-a="B-shopkid" data-kid="${kk.id}" style="display:flex;align-items:center;gap:8px">${kk.emoji} ${kk.name} · ${pot(kk.id)}</button>`).join('')}</div>
+    <div class="grid">${REWARDS.map(r => {
+      const short = r.price - p;
+      return `<button class="tile ${short > 0 ? 'locked' : ''}" data-a="B-redeem" data-id="${r.id}">
+        <span class="em">${r.emoji}</span><span class="lbl">${r.label}</span><b>${r.price}</b>
+        ${short > 0 ? `<span class="lockline">🔒 ${short} more to go</span>` : ''}</button>`;
+    }).join('')}</div>
+  </div></div>`;
+}
+
+// ================================================================ Variant C — Step by step
+function frames(filled, total) {
+  total = Math.max(total, filled, 10);
+  const rows = Math.ceil(total / 10);
+  let out = '';
+  for (let r = 0; r < rows; r++) {
+    out += `<div class="C-frame">${Array.from({ length: 10 }, (_, i) => { const n = r * 10 + i; return n < total ? peb(n, n >= filled) : '<span></span>'; }).join('')}</div>`;
+  }
+  return `<div class="C-frames">${out}</div>`;
+}
+function VariantC() {
+  const back = to => `<button class="C-back" data-a="C-go" data-step="${to}">←</button>`;
+  if (ui.step === 'who' || !ui.kid) {
+    return `<div class="C-wrap"><div class="C-who">${KIDS.map(k => `
+      <button data-a="C-pick" data-kid="${k.id}">${avatar(k)}<b style="font-size:34px">${k.name}</b></button>`).join('')}</div></div>`;
+  }
+  const k = kidById(ui.kid), p = pot(k.id);
+  const goal = REWARDS.find(r => r.id === ui.goal[k.id]);
+  const top = (title, to = 'home') => `<div class="C-top">${back(to)}${avatar(k)}<h2 style="font-size:28px">${title}</h2></div>`;
+
+  if (ui.step === 'home') {
+    return `<div class="C-wrap">
+      <div class="C-top"><button class="C-back" data-a="C-go" data-step="who">${k.emoji}</button><h2 style="font-size:30px">${k.name}</h2>
+        <span style="margin-left:auto;font-size:22px;font-weight:800">${p} <span class="muted" style="font-size:16px">pebbles</span></span></div>
+      ${goal ? `<div class="C-goal"><span class="em">${goal.emoji}</span><div><b style="font-size:20px">${goal.label}</b><div class="muted">${p >= goal.price ? 'You can get it! 🎉' : `${goal.price - p} more to go`}</div></div></div>` +
+        frames(Math.min(p, goal.price), goal.price)
+        : `<div class="C-goal"><span class="em">⭐</span><span class="muted">Pick something to save for in “Spend”</span></div>` + frames(p, p)}
+      <div class="C-actions" style="margin-top:24px">
+        <button class="bigbtn" data-a="C-go" data-step="jobs"><span class="em">🧹</span>I did a job</button>
+        <button class="bigbtn" data-a="C-go" data-step="kind"><span class="em">💛</span>I was kind</button>
+        <button class="bigbtn" data-a="C-go" data-step="spend"><span class="em">🎁</span>Spend</button>
+      </div></div>`;
+  }
+  if (ui.step === 'jobs') {
+    const all = [...DAILY, ...OCCASIONAL];
+    const per = 6, pages = Math.ceil(all.length / per);
+    const q = ui.search.trim().toLowerCase();
+    const list = q ? all.filter(c => c.label.toLowerCase().includes(q)) : all.slice(ui.page * per, ui.page * per + per);
+    return `<div class="C-wrap">${top(ui.page === 0 && !q ? 'Which job?' : 'More jobs')}
+      <div class="grid">${list.map(c => `
+        <button class="tile ${isDaily(c.id) && doneToday(k.id, c.id) ? 'done' : ''}" data-a="C-job" data-id="${c.id}">
+          <span class="em">${c.emoji}</span><span class="lbl">${c.label}</span>${dots(c.value)}</button>`).join('')}</div>
+      ${q ? '' : `<div class="C-pager"><button data-a="C-page" data-d="-1" ${ui.page === 0 ? 'disabled' : ''}>◀</button>
+        <span style="align-self:center" class="muted">${Array.from({ length: pages }, (_, i) => i === ui.page ? '●' : '○').join(' ')}</span>
+        <button data-a="C-page" data-d="1" ${ui.page >= pages - 1 ? 'disabled' : ''}>▶</button></div>`}
+      <details style="margin-top:20px"><summary class="muted">🔍 grown-up search</summary>
+        <input class="search" id="search" placeholder="Search jobs…" value="${esc(ui.search)}" autocomplete="off" style="margin-top:10px"></details>
+    </div>`;
+  }
+  if (ui.step === 'kind') {
+    return `<div class="C-wrap">${top('What kind thing?')}
+      <div class="grid">${DEEDS.map(d => `<button class="tile" data-a="C-deed" data-id="${d.id}"><span class="em">${d.emoji}</span><span class="lbl">${d.label}</span>${dots(d.value)}</button>`).join('')}
+        <button class="tile" data-a="C-custom"><span class="em">✏️</span><span class="lbl">Something else</span></button></div>
+    </div>${ui.sheet === 'custom' ? customSheet('C-custom-save', false) : ''}`;
+  }
+  if (ui.step === 'spend') {
+    return `<div class="C-wrap">${top('What do you want?')}
+      <div class="grid">${REWARDS.map(r => {
+        const short = r.price - p;
+        return `<button class="tile ${short > 0 ? 'locked' : ''}" data-a="C-reward" data-id="${r.id}">
+          <span class="em">${r.emoji}</span><span class="lbl">${r.label}</span>
+          ${r.price <= 10 ? `<span class="dots">${Array.from({ length: r.price }, (_, i) => peb(i, i >= p)).join('')}</span>` : `<b>${r.price}</b>`}
+          ${short > 0 ? `<span class="lockline">${ui.goal[k.id] === r.id ? '⭐ saving for this' : `🔒 ${short} more · tap to save for it`}</span>` : ''}
+        </button>`;
+      }).join('')}</div></div>`;
+  }
+  if (ui.step === 'confirm') {
+    const r = REWARDS.find(x => x.id === ui.pending);
+    return `<div class="C-wrap">${top('Swap pebbles?', 'spend')}
+      <div class="C-yay"><span class="em">${r.emoji}</span><h1>${r.label}</h1>
+        <div>${frames(r.price, r.price)}</div>
+        <div class="muted" style="font-size:20px">${r.price} pebbles · you have ${p}</div>
+        <div class="C-confirm">
+          <button data-a="C-go" data-step="spend" style="background:#fff">✗</button>
+          <button data-a="C-redeem" style="background:var(--good);color:#fff">✓</button>
+        </div></div></div>`;
+  }
+  if (ui.step === 'yay') {
+    const e = ui.last;
+    const earned = e.amount > 0;
+    return `<div class="C-wrap"><div class="C-yay">
+      <span class="em">${e.emoji}</span>
+      <h1>${earned ? `Yay ${k.name}!` : `Enjoy your ${e.label}!`}</h1>
+      ${earned ? `<div class="dots">${Array.from({ length: e.amount }, (_, i) => peb(i)).join('')}</div><div style="font-size:30px;font-weight:900">+${e.amount}</div>` : ''}
+      <div style="display:flex;gap:16px;margin-top:20px">
+        <button class="bigbtn" data-a="C-undo">↩︎ Oops, undo</button>
+        <button class="bigbtn" data-a="C-go" data-step="home" style="background:var(--ink);color:#fff">OK</button>
+      </div></div></div>`;
+  }
+}
+
+// ---------------------------------------------------------------- events
+const FAIL = { already: 'Already done today ✓', short: 'Not enough pebbles yet 🔒' };
+document.addEventListener('click', ev => {
+  const el = ev.target.closest('[data-a]');
+  if (!el) return;
+  if (el.dataset.a === 'close' && ev.target.closest('[data-stop]') && !ev.target.closest('.x')) return; // click inside sheet
+  const a = el.dataset.a, id = el.dataset.id, d = Number(el.dataset.d || 0);
+  const kid = el.dataset.kid || ui.kid;
+  switch (a) {
+    case 'close': ui.sheet = null; ui.search = ''; break;
+    case 'cat': ui.cat = id; break;
+    case 'amt': ui.amount = Math.max(1, Math.min(10, ui.amount + d)); break;
+    // A
+    case 'A-pick': ui.kid = kid; ui.tab = 'chores'; break;
+    case 'A-switch': ui.kid = null; break;
+    case 'A-tab': ui.tab = id; break;
+    case 'A-more': ui.sheet = 'more'; ui.search = ''; ui.cat = 'all'; break;
+    case 'A-chore': toastFor(earnChore(kid, DAILY.find(c => c.id === id)), kid, FAIL); break;
+    case 'A-occ': toastFor(earnChore(kid, OCCASIONAL.find(c => c.id === id)), kid, FAIL); ui.sheet = null; break;
+    case 'A-deed': toastFor(earnDeed(kid, DEEDS.find(x => x.id === id)), kid, FAIL); break;
+    case 'A-custom': ui.sheet = 'custom'; ui.note = ''; ui.amount = 2; break;
+    case 'A-custom-save': toastFor(earnCustomDeed(kid, ui.note, ui.amount), kid, FAIL); ui.sheet = null; break;
+    case 'A-reward': toastFor(redeem(kid, REWARDS.find(r => r.id === id)), kid, FAIL); break;
+    // B
+    case 'B-earn': {
+      const list = el.dataset.kind === 'deed' ? DEEDS : [...DAILY, ...OCCASIONAL];
+      const item = list.find(x => x.id === id);
+      if (el.dataset.kind !== 'deed' && doneToday(kid, id)) {  // tapping ✓ undoes today's entry
+        const e = log.find(x => x.kid === kid && x.kind === 'chore' && x.item === id && x.day === day && !x.struck);
+        e.struck = true; toast(`${kidById(kid).emoji} ${item.emoji} undone`); break;
+      }
+      const key = `${kid}:${id}`, now = Date.now();
+      if (el.dataset.kind === 'deed' && lastTap.key === key && now - lastTap.at < 2000) { toast('Already counted 👍 · tap the pot to undo'); break; }
+      lastTap = { key, at: now };
+      toastFor(el.dataset.kind === 'deed' ? earnDeed(kid, item) : earnChore(kid, item), kid, FAIL);
+      break;
+    }
+    case 'B-dec': {  // badge tap: take back the most recent of today's entries for this good deed
+      const e = log.filter(x => x.kid === kid && x.item === id && x.day === day && !x.struck).pop();
+      if (e) { e.struck = true; toast(`${kidById(kid).emoji} ${e.emoji} −${e.amount}`); }
+      break;
+    }
+    case 'B-today': ui.sheet = 'today'; ui.kid = kid; break;
+    case 'B-unstrike': case 'B-strike': { const e = log.find(x => x.id === Number(id)); e.struck = a === 'B-strike'; break; }
+    case 'B-shop': ui.sheet = 'shop'; ui.kid = ui.kid || KIDS[0].id; break;
+    case 'B-shopkid': ui.kid = kid; break;
+    case 'B-redeem': toastFor(redeem(ui.kid, REWARDS.find(r => r.id === id)), ui.kid, FAIL); break;
+    case 'B-custom': ui.sheet = 'custom'; ui.note = ''; ui.amount = 2; ui.kid = ui.kid || KIDS[0].id; break;
+    case 'B-custom-kid': ui.kid = kid; break;
+    case 'B-custom-save': toastFor(earnCustomDeed(ui.kid, ui.note, ui.amount), ui.kid, FAIL); ui.sheet = null; break;
+    // C
+    case 'C-pick': ui.kid = kid; ui.step = 'home'; break;
+    case 'C-go': ui.step = el.dataset.step; ui.page = 0; ui.search = ''; ui.sheet = null; if (ui.step === 'who') ui.kid = null; break;
+    case 'C-page': ui.page += d; break;
+    case 'C-job': {
+      const r = earnChore(kid, [...DAILY, ...OCCASIONAL].find(c => c.id === id));
+      if (typeof r === 'string') toast(FAIL[r]); else { ui.last = r; ui.step = 'yay'; }
+      break;
+    }
+    case 'C-deed': ui.last = earnDeed(kid, DEEDS.find(x => x.id === id)); ui.step = 'yay'; break;
+    case 'C-custom': ui.sheet = 'custom'; ui.note = ''; ui.amount = 2; break;
+    case 'C-custom-save': ui.last = earnCustomDeed(kid, ui.note, ui.amount); ui.sheet = null; ui.step = 'yay'; break;
+    case 'C-reward': {
+      const r = REWARDS.find(x => x.id === id);
+      if (pot(kid) >= r.price) { ui.pending = id; ui.step = 'confirm'; }
+      else { ui.goal[kid] = ui.goal[kid] === id ? undefined : id; }
+      break;
+    }
+    case 'C-redeem': {
+      const r = redeem(kid, REWARDS.find(x => x.id === ui.pending));
+      if (typeof r === 'string') toast(FAIL[r]); else {
+        if (ui.goal[kid] === ui.pending) ui.goal[kid] = undefined;
+        ui.last = r; ui.step = 'yay';
+      }
+      break;
+    }
+    case 'C-undo': undo(ui.last); ui.step = 'home'; break;
+    // prototype chrome
+    case 'prev': setVariant(-1); return;
+    case 'next': setVariant(1); return;
+    case 'state': document.getElementById('state').classList.toggle('show'); renderState(); return;
+    case 'nextday': day++; break;
+    case 'reset': seed(); resetUi(); break;
+    case 'strike': { const e = log.find(x => x.id === Number(id)); e.struck = !e.struck; break; }
+  }
+  render();
+});
+document.addEventListener('input', ev => {
+  if (ev.target.id === 'search') { ui.search = ev.target.value; ui.page = 0; renderKeepFocus('search'); }
+  if (ev.target.id === 'note') ui.note = ev.target.value;
+});
+document.addEventListener('keydown', ev => {
+  if (ev.target.closest('input, textarea, [contenteditable]')) return;
+  if (ev.key === 'ArrowLeft') setVariant(-1);
+  if (ev.key === 'ArrowRight') setVariant(1);
+});
+
+// ---------------------------------------------------------------- render
+const VARIANTS = { A: ['Me first', VariantA], B: ['Family board', VariantB], C: ['Step by step', VariantC] };
+function setVariant(dir) {
+  const keys = Object.keys(VARIANTS);
+  variant = keys[(keys.indexOf(variant) + dir + keys.length) % keys.length];
+  history.replaceState(null, '', `?variant=${variant}`);
+  resetUi(); render();
+}
+function render() {
+  document.getElementById('app').innerHTML = VARIANTS[variant][1]();
+  document.getElementById('proto').innerHTML =
+    `<button data-a="prev">◀</button><span class="lab">PROTOTYPE · ${variant} (${VARIANTS[variant][0]})</span><button data-a="next">▶</button>
+     <button data-a="state">state</button>`;
+  renderState();
+}
+function renderKeepFocus(id) {
+  const el = document.getElementById(id), pos = el.selectionStart;
+  render();
+  const n = document.getElementById(id);
+  if (n) { n.focus(); n.setSelectionRange(pos, pos); }
+}
+function renderState() {
+  const s = document.getElementById('state');
+  if (!s.classList.contains('show')) return;
+  s.innerHTML = `<b>day ${day}</b> · ${KIDS.map(k => `${k.emoji} ${k.name}: ${pot(k.id)}`).join(' · ')}
+    <div><button data-a="nextday">☀️ Next day</button><button data-a="reset">⟲ Reset</button></div>
+    <hr style="border-color:#333">${log.slice().reverse().map(e =>
+      `<div class="${e.struck ? 'struck' : ''}">#${e.id} d${e.day} ${kidById(e.kid).emoji} ${e.emoji} ${esc(e.label)} <b>${e.amount > 0 ? '+' : ''}${e.amount}</b>
+        <button data-a="strike" data-id="${e.id}" style="padding:0 6px">${e.struck ? 'unstrike' : 'strike'}</button></div>`).join('')}`;
+}
+
+seed(); resetUi(); render();
+</script>
+</body>
+</html>
