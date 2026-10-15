@@ -11,7 +11,7 @@ What does Pebblepot come with on first start? This covers the daily chores, occa
 ## Answer
 
 The draft in [starting-content.md](../starting-content.md) is the default content, and the user went ahead to the spec without changing the lists:
-- **Family members:** Kid 1 and Kid 2 (kids), Mom and Dad (parents). Faces and colours are placeholders, and pots start at 0.
+- **Family members:** placeholder family members Kid 1 and Kid 2 (kids), Mom and Dad (parents), renamed in edit mode on day one. Faces and colours are placeholders, and pots start at 0.
 - **9 daily chores** worth 10 pebbles a day in total, **11 good deeds**, **18 occasional chores** (values 1–4), and **17 rewards** (5–100, including 3 for grown-ups).
 - **New items** start at 1 pebble.
 - All of it is loaded once, on first start with an empty database, and is editable from the board afterwards.
@@ -26,5 +26,5 @@ The draft in [starting-content.md](../starting-content.md) is the default conten
 
 **2026-10-15, user answers:**
 - The default pebble value for new items is **1**.
-- Ship with family members **Kid 1, Kid 2, Mom and Dad**.
+- Ship with family members **Kid 1, Kid 2, Mom and Dad** (placeholders, renamed in the app; real names are kept out of the public repo).
 - Pots start at 0 (unchanged).

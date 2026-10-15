@@ -2,7 +2,7 @@
 
 This is the default content Pebblepot ships with on first start. Everything here can be edited, reordered or retired from the board in ✏️ Edit mode (see [How do parents manage the chore, good deed and reward lists?](issues/04-parent-screens.md)). Ticket: [What starting content does Pebblepot ship with?](issues/08-starting-content.md)
 
-**Family members** (shipped ready to use, everyone's pot starts at **0**). Faces and colours are placeholders, editable in ✏️ Edit mode:
+**Family members** (shipped ready to use, everyone's pot starts at **0**). Names, faces and colours are placeholders, renamed in ✏️ Edit mode on day one. Real names are kept out of this public repo:
 
 | | Name | Role | Colour |
 |---|---|---|---|

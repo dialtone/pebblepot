@@ -6,7 +6,7 @@ Map: [map.md](map.md). Vocabulary: [GLOSSARY.md](../../GLOSSARY.md). Default dat
 
 ## Problem Statement
 
-A household with two young kids (Kid 1 and Kid 2, aged 4 and 6) wants to reward good behaviour and chores with something the kids can see building up and later spend. Doing it on paper or from memory doesn't work. Nobody remembers who already made their bed today, a 4-year-old can't read a chart, the kids can't see how close they are to a treat, and mistakes and double-counting creep in. The family wants one shared screen in the kitchen, the iPad, that anyone can tap, kids or grown-ups. It should keep an honest record and make saving up for something visible and exciting. It has to run on their own home server with no accounts, cloud services or sign-ins.
+A household with two young kids (aged 4 and 6) wants to reward good behaviour and chores with something the kids can see building up and later spend. Doing it on paper or from memory doesn't work. Nobody remembers who already made their bed today, a 4-year-old can't read a chart, the kids can't see how close they are to a treat, and mistakes and double-counting creep in. The family wants one shared screen in the kitchen, the iPad, that anyone can tap, kids or grown-ups. It should keep an honest record and make saving up for something visible and exciting. It has to run on their own home server with no accounts, cloud services or sign-ins.
 
 ## Solution
 
@@ -106,7 +106,7 @@ There are no sign-ins, PINs or approvals: the family runs on the honour system, 
 63. As a family member, I want the board to refresh itself when the iPad wakes from sleep or reconnects, so that it never shows stale pots.
 
 ### First start and data
-64. As a parent, I want Pebblepot to start with Kid 1, Kid 2, Mom and Dad, all at 0 pebbles, so that we can use it straight away.
+64. As a parent, I want Pebblepot to start with placeholder family members (Kid 1, Kid 2, Mom, Dad), all at 0 pebbles, that I rename in edit mode, so that we can use it straight away and our real names never live in the code.
 65. As a parent, I want it to start with sensible default chores, good deeds and rewards (see starting-content.md), so that we don't begin from a blank board.
 66. As a parent, I want the default content loaded only once, on first start, so that my edits are never overwritten.
 
@@ -151,7 +151,7 @@ There are no sign-ins, PINs or approvals: the family runs on the honour system, 
 3. **Clock.** Supplies "now" and the household time zone, and so the local day. Production uses system time. Tests inject a controllable clock that can be moved forward.
 4. **Web layer.** Axum routes for the board page, the htmx partials (top strip, each section, Spend sheet, today list, edit forms) and the command endpoints. Commands are form POSTs that answer with re-rendered partials. CSRF protection comes from `CsrfLayer`.
 5. **Live updates.** One SSE endpoint. After any committed write the version counter is bumped, and every open stream receives a `changed` event whose data is the new version number. It has to be non-empty, because SSE drops events with empty data. Clients refetch the board when they get a `changed` event, when the page becomes visible again, and after reconnecting. If the stream errors, for example during a restart, the client re-opens it, because the browser won't retry after an error response. A keep-alive is sent every 15 seconds. On shutdown a cancellation token closes all streams at once.
-6. **Seed.** On start-up, if the database has no family members, it loads the content in [starting-content.md](starting-content.md): Kid 1 and Kid 2 (kids), Mom and Dad (parents), all chores, good deeds and rewards with their pictures, values and order. This never runs again.
+6. **Seed.** On start-up, if the database has no family members, it loads the content in [starting-content.md](starting-content.md): placeholder family members Kid 1 and Kid 2 (kids), Mom and Dad (parents), renamed in edit mode on day one, all chores, good deeds and rewards with their pictures, values and order. This never runs again.
 7. **Packaging.** A two-stage Dockerfile in the Pebblepot repo: compile in the official `rust` image, then copy the binary plus templates, migrations and static assets into `debian:trixie-slim`.
 8. **NixOS module** (lives in the `dialtone/nixos` repo as a homelab module in the same style as Hermes):
    - **Source and build:** pins the public `dialtone/pebblepot` repo as a source-only flake input. A oneshot build service runs before the container and builds the Dockerfile into the local image tag `pebblepot:<shortRev>`, skipping the build if the tag already exists.
