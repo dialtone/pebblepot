@@ -1,0 +1,23 @@
+{#- A sheet over the board. Tapping outside it or ✕ closes it; the board underneath is unchanged. #}
+<div class="sheet-bg" id="today-{{ today.member.id }}" data-today-list="{{ today.member.id }}"{% if oob %} hx-swap-oob="true"{% endif %}
+     hx-on:click="if (event.target === this) this.remove()">
+  <div class="sheet" role="dialog" aria-label="{{ today.member.name }}'s day">
+    <div class="sheet-head">
+      <span class="who"><span class="face" style="--c: {{ today.member.colour }}">{{ today.member.face }}</span>
+        <h2>{{ today.member.name }}'s day · <span data-today-pot="{{ today.member.pot }}">{{ today.member.pot }}</span> pebbles</h2></span>
+      <button type="button" class="x" aria-label="Close" data-close hx-on:click="this.closest('.sheet-bg').remove()">✕</button>
+    </div>
+    {%- for e in today.entries %}
+    <div class="today-row" data-entry="{{ e.id }}" data-entry-name="{{ e.name }}" data-amount="{{ e.raw_amount }}">
+      <span class="picture">{{ e.picture }}</span>
+      <b class="name">{{ e.name }}</b>
+      <b class="amount">{{ e.amount }}</b>
+      <button type="button" class="pill" data-undo-entry="{{ e.id }}"
+              hx-post="{{ crate::web::UNDO_PATH }}" hx-vals='{"entry": {{ e.id }}}' hx-swap="none">✕ Undo</button>
+    </div>
+    {%- endfor %}
+    {%- if today.entries.is_empty() %}
+    <p class="empty" data-empty>Nothing yet today.</p>
+    {%- endif %}
+  </div>
+</div>

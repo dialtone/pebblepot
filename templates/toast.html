@@ -1,0 +1,7 @@
+<div id="toast" class="toast show {{ toast.kind }}" aria-live="polite" hx-swap-oob="true">
+  <span data-toast="{{ toast.kind }}"{% if !toast.refusal.is_empty() %} data-refusal="{{ toast.refusal }}"{% endif %}>{{ toast.text }}</span>
+  {%- if let Some(entry) = toast.undo_entry %}
+  <button type="button" class="undo" data-undo-entry="{{ entry }}"
+          hx-post="{{ crate::web::UNDO_PATH }}" hx-vals='{"entry": {{ entry }}}' hx-swap="none">↩︎ Undo</button>
+  {%- endif %}
+</div>

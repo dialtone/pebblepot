@@ -1,0 +1,6 @@
+{%- for item in items %}
+{% include "row.html" %}
+{%- endfor %}
+{%- if items.is_empty() %}
+<p class="empty" data-empty>No jobs match.</p>
+{%- endif %}
