@@ -8,23 +8,33 @@
 <script src="{{ htmx_path }}" defer></script>
 <script src="{{ sse_ext_path }}" defer></script>
 <script src="{{ live_js_path }}" defer></script>
+{%- if editing %}
+<script src="{{ reorder_js_path }}" defer></script>
+{%- endif %}
 </head>
 <body>
-<main class="board">
+<main class="board{% if editing %} editing{% endif %}">
   {#- Data attributes are the stable markers tests rely on; keep them when changing layout. #}
   {% include "pots.html" %}
+  {%- if editing %}
+  {#- Sent along by the live refresh and the search, so this device keeps showing edit rows. #}
+  <input type="hidden" name="edit" value="1" data-edit-mode>
+  <p class="edit-hint">✏️ Editing the board: ✏️ to change, drag ⠿ to move, 🗑 to retire.</p>
+  {%- endif %}
 
   {%- for section in sections %}
   <section class="section" data-section="{{ section.key }}">
     <div class="section-head">
       <h2>{{ section.title }}</h2>
+      {%- if !editing %}
       <button type="button" class="pill" data-something-else
               hx-get="{{ crate::web::SOMETHING_ELSE_PATH }}?section={{ section.key }}" hx-target="#sheet">✏️ Something else</button>
+      {%- endif %}
     </div>
     {%- if section.searchable %}
     <input type="search" name="q" class="search" placeholder="Type to find a job… (wash, leaves, laundry)"
            autocomplete="off" hx-get="{{ occasional_rows_path }}" hx-trigger="input changed delay:150ms, search"
-           hx-target="#rows-{{ section.key }}" data-search>
+           hx-target="#rows-{{ section.key }}" hx-include="[data-edit-mode]" data-search>
     {%- endif %}
     <div class="rows" id="rows-{{ section.key }}">
       {%- for item in section.items %}
@@ -34,10 +44,13 @@
   </section>
   {%- endfor %}
 </main>
+{%- if editing %}
+<a class="edit-done" href="/" data-edit-done>✓ Done editing</a>
+{%- endif %}
 <div id="sheet"></div>
 <div id="toast" class="toast" aria-live="polite"></div>
 {#- Live sync: one event stream; each `changed` refetches pots and rows (keeping the Other jobs search). #}
 <div id="live" hidden hx-ext="sse" sse-connect="{{ events_path }}" hx-get="{{ board_refresh_path }}"
-     hx-trigger="sse:changed, refresh" hx-include="[data-search], [data-spend-member]" hx-swap="none" hx-sync="this:replace"></div>
+     hx-trigger="sse:changed, refresh" hx-include="[data-search], [data-spend-member], [data-edit-mode]" hx-swap="none" hx-sync="this:replace"></div>
 </body>
 </html>
