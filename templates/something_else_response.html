@@ -1,0 +1,13 @@
+{%- if let Some(section) = section %}
+<div class="rows" id="rows-{{ section.key }}" hx-swap-oob="true">
+  {%- for item in section.items %}
+  {% include "row.html" %}
+  {%- endfor %}
+  {%- if section.items.is_empty() %}
+  <p class="empty" data-empty>No jobs match.</p>
+  {%- endif %}
+</div>
+{% include "pots.html" %}
+<div id="sheet" hx-swap-oob="true"></div>
+{%- endif %}
+{% include "toast.html" %}

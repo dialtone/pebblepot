@@ -30,6 +30,10 @@ pub enum Refusal {
     NoGoal,
     /// Got it before the pot is back to zero.
     GoalNotReady,
+    /// Something else needs a name.
+    NameNeeded,
+    /// Something else's pebble value is outside `SOMETHING_ELSE_VALUES`.
+    BadValue,
 }
 
 impl Refusal {
@@ -47,6 +51,8 @@ impl Refusal {
             Refusal::Affordable => "affordable",
             Refusal::NoGoal => "no_goal",
             Refusal::GoalNotReady => "goal_not_ready",
+            Refusal::NameNeeded => "name_needed",
+            Refusal::BadValue => "bad_value",
         }
     }
 
@@ -63,6 +69,8 @@ impl Refusal {
             Refusal::Affordable => "Enough pebbles already: just tap it 🎁",
             Refusal::NoGoal => "Not saving for a goal",
             Refusal::GoalNotReady => "Not there yet ⭐",
+            Refusal::NameNeeded => "Give it a name first ✏️",
+            Refusal::BadValue => "Pick 1 to 100 pebbles",
         }
     }
 }
@@ -625,4 +633,135 @@ fn member_and_pot(
         |r| Ok((r.get(0)?, r.get(1)?)),
     )
     .optional()
+}
+
+/// A new something else starts at this many pebbles.
+pub const SOMETHING_ELSE_DEFAULT_VALUE: i64 = 1;
+/// The pebble values Something else accepts: pebbles are only ever gained, and the cap stops a typo
+/// from filling a pot.
+pub const SOMETHING_ELSE_VALUES: std::ops::RangeInclusive<i64> = 1..=100;
+/// The picture used when none is given.
+pub const SOMETHING_ELSE_PICTURE: &str = "✨";
+
+/// What ✏️ Something else was filled in with.
+#[derive(Clone, Debug)]
+pub struct SomethingElse {
+    /// The section it was added from: a daily chore, occasional chore or good deed.
+    pub kind: ItemKind,
+    pub name: String,
+    pub picture: String,
+    pub value: i64,
+    /// On: create the item in that section, then earn it. Off: a one-off log entry with no item.
+    pub keep_on_board: bool,
+}
+
+/// A something else that was just earned.
+#[derive(Clone, Debug)]
+pub struct EarnedSomethingElse {
+    pub entry_id: i64,
+    pub member_id: i64,
+    /// The new chore or good deed, if it was kept on the board.
+    pub item_id: Option<i64>,
+    pub face: String,
+    pub picture: String,
+    pub amount: i64,
+}
+
+/// A family member did something that isn't on the board yet: earn it in one step. Kept on the
+/// board, it first becomes a new item at the end of its section (and then follows that section's
+/// rules); otherwise only a one-off log entry is written. The same person earning something of the
+/// same name within `REPEAT_TAP_WINDOW` is refused as a repeat tap, so a double-tapped
+/// "Give pebbles" neither earns twice nor adds two rows.
+pub async fn earn_something_else(
+    store: &Store,
+    now: Timestamp,
+    time_zone: &TimeZone,
+    member_id: i64,
+    what: SomethingElse,
+) -> Result<EarnedSomethingElse, CommandError> {
+    if !matches!(
+        what.kind,
+        ItemKind::DailyChore | ItemKind::OccasionalChore | ItemKind::GoodDeed
+    ) {
+        return Err(CommandError::Refused(Refusal::UnknownItem));
+    }
+    let name = what.name.trim().to_string();
+    if name.is_empty() {
+        return Err(CommandError::Refused(Refusal::NameNeeded));
+    }
+    if !SOMETHING_ELSE_VALUES.contains(&what.value) {
+        return Err(CommandError::Refused(Refusal::BadValue));
+    }
+    let picture = match what.picture.trim() {
+        "" => SOMETHING_ELSE_PICTURE.to_string(),
+        picture => picture.to_string(),
+    };
+    let (kind, value, keep) = (what.kind, what.value, what.keep_on_board);
+    let today = local_day(now, time_zone).to_string();
+    let created_at = now.to_string();
+    let outcome = store
+        .call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let face: Option<String> = tx
+                .query_row(
+                    "SELECT face FROM family_member WHERE id = ?1 AND retired = 0",
+                    [member_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let Some(face) = face else {
+                return Ok(Err(Refusal::UnknownMember));
+            };
+            let previous: Option<String> = tx
+                .query_row(
+                    "SELECT created_at FROM log_entry
+                     WHERE member_id = ?1 AND name = ?2 AND entry_type = 'earn'
+                     ORDER BY id DESC LIMIT 1",
+                    (member_id, &name),
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(previous) = previous {
+                let previous: Timestamp = previous.parse()?;
+                if now.duration_since(previous).abs() <= REPEAT_TAP_WINDOW {
+                    return Ok(Err(Refusal::RepeatTap));
+                }
+            }
+            let item_id = if keep {
+                tx.execute(
+                    "INSERT INTO item (kind, name, picture, value, position)
+                     SELECT ?1, ?2, ?3, ?4, COALESCE(MAX(position), 0) + 1 FROM item WHERE kind = ?1",
+                    (kind.as_str(), &name, &picture, value),
+                )?;
+                Some(tx.last_insert_rowid())
+            } else {
+                None
+            };
+            tx.execute(
+                "INSERT INTO log_entry
+                     (member_id, entry_type, item_id, name, picture, amount, local_day, created_at)
+                 VALUES (?1, 'earn', ?2, ?3, ?4, ?5, ?6, ?7)",
+                (
+                    member_id,
+                    item_id,
+                    &name,
+                    &picture,
+                    value,
+                    &today,
+                    &created_at,
+                ),
+            )?;
+            let entry_id = tx.last_insert_rowid();
+            tx.commit()?;
+            Ok(Ok(EarnedSomethingElse {
+                entry_id,
+                member_id,
+                item_id,
+                face,
+                picture,
+                amount: value,
+            }))
+        })
+        .await?;
+    outcome.map_err(CommandError::Refused)
 }

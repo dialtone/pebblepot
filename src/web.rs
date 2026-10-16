@@ -22,6 +22,7 @@ use tower_http::csrf::CsrfLayer;
 
 use crate::board::{self, Board, Item, TodayList};
 use crate::clock::{Clock, local_day};
+use crate::model::ItemKind;
 use crate::rules::{self, CommandError, Refusal};
 use crate::store::Store;
 
@@ -68,6 +69,10 @@ pub fn router(state: AppState) -> Router {
         .route(GOAL_GOT_IT_PATH, post(goal_got_it))
         .route(EVENTS_PATH, get(events))
         .route(BOARD_REFRESH_PATH, get(board_refresh))
+        .route(
+            SOMETHING_ELSE_PATH,
+            get(something_else_sheet).post(something_else),
+        )
         .route(
             SSE_EXT_PATH,
             get(|| async {
@@ -204,6 +209,25 @@ impl Section {
     fn is_chores(self) -> bool {
         matches!(self, Section::DailyChores | Section::OccasionalChores)
     }
+
+    fn from_key(key: &str) -> Option<Self> {
+        [
+            Section::DailyChores,
+            Section::GoodDeeds,
+            Section::OccasionalChores,
+        ]
+        .into_iter()
+        .find(|section| section.key() == key)
+    }
+
+    /// The kind of item ✏️ Something else adds to this section.
+    fn kind(self) -> ItemKind {
+        match self {
+            Section::DailyChores => ItemKind::DailyChore,
+            Section::GoodDeeds => ItemKind::GoodDeed,
+            Section::OccasionalChores => ItemKind::OccasionalChore,
+        }
+    }
 }
 
 pub const EARN_CHORE_PATH: &str = "/earn/chore";
@@ -227,6 +251,10 @@ pub const GOAL_SET_PATH: &str = "/goal/set";
 pub const GOAL_GIVE_UP_PATH: &str = "/goal/give-up";
 /// POST `member=<id>`: Got it, the Ready goal was handed over.
 pub const GOAL_GOT_IT_PATH: &str = "/goal/got-it";
+/// GET `?section=<key>`: the ✏️ Something else sheet for a section. POST `section`, `member`,
+/// `name`, `picture`, `value` (default 1), `keep` (the Keep on the board checkbox) and the Other
+/// jobs search `q`: earn it, adding it to the section if kept.
+pub const SOMETHING_ELSE_PATH: &str = "/something-else";
 
 struct MemberView {
     id: i64,
@@ -936,4 +964,141 @@ async fn goal_got_it(
         format!("{} {} 🎉", g.face, g.picture)
     })?;
     goal_reply(&state, now, form.member, toast).await
+}
+
+/// The ✏️ Something else sheet: name, picture, pebble value, who did it and Keep on the board.
+#[derive(Template)]
+#[template(path = "something_else.html")]
+struct SomethingElseSheet {
+    section_key: &'static str,
+    section_title: &'static str,
+    members: Vec<MemberView>,
+    default_value: i64,
+    min_value: i64,
+    max_value: i64,
+    default_picture: &'static str,
+}
+
+#[derive(Deserialize)]
+struct SomethingElseQuery {
+    section: String,
+}
+
+async fn something_else_sheet(
+    State(state): State<AppState>,
+    Query(query): Query<SomethingElseQuery>,
+) -> Result<Response, AppError> {
+    let Some(section) = Section::from_key(&query.section) else {
+        return Ok((StatusCode::NOT_FOUND, "No such section").into_response());
+    };
+    let board = board::load(&state.store, state.today()).await?;
+    Ok(render(SomethingElseSheet {
+        section_key: section.key(),
+        section_title: section.title(),
+        members: member_views(&board),
+        default_value: rules::SOMETHING_ELSE_DEFAULT_VALUE,
+        min_value: *rules::SOMETHING_ELSE_VALUES.start(),
+        max_value: *rules::SOMETHING_ELSE_VALUES.end(),
+        default_picture: rules::SOMETHING_ELSE_PICTURE,
+    })?
+    .into_response())
+}
+
+/// The sheet's form. Numbers arrive as text so a blank or garbled field becomes a refusal toast.
+#[derive(Deserialize)]
+struct SomethingElseForm {
+    section: String,
+    #[serde(default)]
+    member: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    picture: String,
+    #[serde(default)]
+    value: String,
+    /// Present ("on") only when Keep on the board is ticked.
+    keep: Option<String>,
+    /// The Other jobs search on this device, so the redrawn rows keep it.
+    #[serde(default)]
+    q: String,
+}
+
+/// The reply to Something else: on success the section's rows, the pots and an empty `#sheet`
+/// (closing the sheet), all out of band, plus the toast. A refusal is just the toast, so the sheet
+/// stays open to be fixed.
+#[derive(Template)]
+#[template(path = "something_else_response.html")]
+struct SomethingElseResponse {
+    section: Option<SectionView>,
+    members: Vec<MemberView>,
+    toast: ToastView,
+    oob: bool,
+}
+
+async fn something_else(
+    State(state): State<AppState>,
+    Form(form): Form<SomethingElseForm>,
+) -> Result<Response, AppError> {
+    let Some(section) = Section::from_key(&form.section) else {
+        return Ok((StatusCode::NOT_FOUND, "No such section").into_response());
+    };
+    let now = state.clock.now();
+    let value = match form.value.trim() {
+        "" => Ok(rules::SOMETHING_ELSE_DEFAULT_VALUE),
+        value => value.parse().map_err(|_| Refusal::BadValue),
+    };
+    let member = form
+        .member
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| Refusal::UnknownMember);
+    let result = match (member, value) {
+        (Ok(member), Ok(value)) => {
+            let what = rules::SomethingElse {
+                kind: section.kind(),
+                name: form.name,
+                picture: form.picture,
+                value,
+                keep_on_board: form.keep.is_some(),
+            };
+            rules::earn_something_else(&state.store, now, &state.time_zone, member, what).await
+        }
+        (Err(refusal), _) | (_, Err(refusal)) => Err(CommandError::Refused(refusal)),
+    };
+    let toast = match result {
+        Ok(earned) => ToastView {
+            kind: "earned",
+            refusal: "",
+            text: format!("{} {} +{}", earned.face, earned.picture, earned.amount),
+            undo_entry: Some(earned.entry_id),
+        },
+        Err(CommandError::Refused(refusal)) => {
+            return Ok(render(SomethingElseResponse {
+                section: None,
+                members: Vec::new(),
+                toast: ToastView::refused(refusal),
+                oob: true,
+            })?
+            .into_response());
+        }
+        Err(CommandError::Store(e)) => return Err(AppError(e)),
+    };
+    let board = board::load(&state.store, local_day(now, &state.time_zone)).await?;
+    let rows = SectionView {
+        key: section.key(),
+        title: section.title(),
+        searchable: section == Section::OccasionalChores,
+        items: section_items(&board, section)
+            .iter()
+            .filter(|item| section != Section::OccasionalChores || matches_search(item, &form.q))
+            .map(|item| item_view(&board, section, item))
+            .collect(),
+    };
+    Ok(render(SomethingElseResponse {
+        section: Some(rows),
+        members: member_views(&board),
+        toast,
+        oob: true,
+    })?
+    .into_response())
 }

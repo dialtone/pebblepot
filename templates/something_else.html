@@ -1,0 +1,37 @@
+{#- ✏️ Something else: a sheet over the board that adds a new chore or good deed and earns it in one
+    step, or (with Keep on the board off) records a one-off that only appears in the log. #}
+<div class="sheet-bg" id="something-else" data-something-else-sheet="{{ section_key }}"
+     hx-on:click="if (event.target === this) this.remove()">
+  <div class="sheet" role="dialog" aria-label="Something else">
+    <div class="sheet-head">
+      <h2>✏️ Something else <span class="muted">· {{ section_title }}</span></h2>
+      <button type="button" class="x" aria-label="Close" data-close hx-on:click="this.closest('.sheet-bg').remove()">✕</button>
+    </div>
+    <form class="something-else" hx-post="{{ crate::web::SOMETHING_ELSE_PATH }}" hx-swap="none"
+          hx-include="[data-search]" hx-disabled-elt="find button[type=submit]">
+      <input type="hidden" name="section" value="{{ section_key }}">
+      <div class="who-did-it" role="radiogroup" aria-label="Who did it?">
+        {%- for m in members %}
+        <label class="who-choice">
+          <input type="radio" name="member" value="{{ m.id }}" required data-member-choice>
+          <span class="face" style="--c: {{ m.colour }}">{{ m.face }}</span><b>{{ m.name }}</b>
+        </label>
+        {%- endfor %}
+      </div>
+      <div class="what">
+        <input type="text" name="picture" class="picture-input" value="{{ default_picture }}" maxlength="16"
+               aria-label="Picture" autocomplete="off">
+        <input type="text" name="name" class="search" required maxlength="80" autocomplete="off"
+               placeholder="What happened? (a grown-up types)" aria-label="Name">
+      </div>
+      <div class="stepper">
+        <button type="button" class="x" aria-label="One fewer" hx-on:click="this.form.elements.value.stepDown()">−</button>
+        <label><input type="number" name="value" value="{{ default_value }}" min="{{ min_value }}" max="{{ max_value }}"
+               inputmode="numeric" aria-label="Pebbles"> pebbles</label>
+        <button type="button" class="x" aria-label="One more" hx-on:click="this.form.elements.value.stepUp()">+</button>
+      </div>
+      <label class="keep"><input type="checkbox" name="keep" checked> Keep on the board</label>
+      <button type="submit" class="give">Give pebbles</button>
+    </form>
+  </div>
+</div>
