@@ -34,6 +34,17 @@ pub struct Board {
     pub occasional_chores: Vec<Item>,
     /// (member id, item id) -> log entry id, for every chore earned on the given day.
     pub done: HashMap<(i64, i64), i64>,
+    /// (member id, good deed id) -> that person's count for the given day, for every good deed
+    /// earned at least once that day.
+    pub good_deed_counts: HashMap<(i64, i64), GoodDeedCount>,
+}
+
+/// One family member's tally for one good deed on one day.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GoodDeedCount {
+    pub count: i64,
+    /// The most recent of those entries: the one the badge takes away.
+    pub latest_entry: i64,
 }
 
 /// The board as it stands on the household's local day `today`.
@@ -90,12 +101,31 @@ pub async fn load(store: &Store, today: Date) -> Result<Board> {
                 )?
                 .collect::<rusqlite::Result<HashMap<_, _>>>()?;
 
+            let good_deed_counts = conn
+                .prepare(
+                    "SELECT l.member_id, l.item_id, COUNT(*), MAX(l.id)
+                     FROM log_entry l JOIN item i ON i.id = l.item_id
+                     WHERE l.entry_type = 'earn' AND l.local_day = ?1 AND i.kind = ?2
+                     GROUP BY l.member_id, l.item_id",
+                )?
+                .query_map((&today, ItemKind::GoodDeed.as_str()), |r| {
+                    Ok((
+                        (r.get(0)?, r.get(1)?),
+                        GoodDeedCount {
+                            count: r.get(2)?,
+                            latest_entry: r.get(3)?,
+                        },
+                    ))
+                })?
+                .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+
             Ok(Board {
                 daily_chores: items(ItemKind::DailyChore)?,
                 good_deeds: items(ItemKind::GoodDeed)?,
                 occasional_chores: items(ItemKind::OccasionalChore)?,
                 members,
                 done,
+                good_deed_counts,
             })
         })
         .await
@@ -157,6 +187,28 @@ pub async fn today_list(store: &Store, member_id: i64, today: Date) -> Result<Op
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(Some(TodayList { member, entries }))
+        })
+        .await
+}
+
+/// Every active reward, in Spend sheet order.
+pub async fn rewards(store: &Store) -> Result<Vec<Item>> {
+    store
+        .call(|conn| {
+            Ok(conn
+                .prepare(
+                    "SELECT id, name, picture, value FROM item
+                     WHERE kind = ?1 AND retired = 0 ORDER BY position, id",
+                )?
+                .query_map([ItemKind::Reward.as_str()], |r| {
+                    Ok(Item {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                        picture: r.get(2)?,
+                        value: r.get(3)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?)
         })
         .await
 }

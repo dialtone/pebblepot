@@ -7,7 +7,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Spec: [Pebblepot v1](../../pebblepot-v1/spec.md)
 
@@ -19,7 +19,7 @@ Spec: [Pebblepot v1](../../pebblepot-v1/spec.md)
 
 ## Comments
 
-**2026-10-15, implemented** (not committed yet):
+**2026-10-15, implemented** (merged to main in PR #1, e88210d):
 - **Server.** `AppState` holds a `watch` version counter and the shutdown `CancellationToken`. One middleware bumps the version after any non-GET/HEAD/OPTIONS request that answers 2xx, so later commands (undo, spend, goals…) are covered with no per-handler code. A refused earn (200 with a refusal toast) bumps too, which is harmless. `GET /events` streams `event: changed` with the version as data (bursts coalesce, keep-alive every 15 s) and ends when the token is cancelled. `GET /board?q=` returns pots plus every section's rows, all out of band, with Other jobs filtered by `q`.
 - **Shutdown.** `main` creates the token, cancels it on SIGTERM/Ctrl-C and passes it to `with_graceful_shutdown`. `build_app` takes it as a third argument. The binary exited about 30 to 40 ms after SIGTERM with streams open.
 - **Client.** htmx-ext-sse 2.2.4 is vendored (the npm tarball's sha1 and sha512 matched the registry metadata). A hidden `#live` element connects with `sse-connect` and refetches `/board` on `sse:changed`, including the search box, so a typed search is kept. `static/live.js` (about 20 lines) also refetches when the stream (re)opens and on `visibilitychange`/`pageshow`. On wake, it re-opens a stream that was closed without an error. The extension already retries failed streams with backoff. Out-of-band swaps that would change nothing are skipped, so a device's own taps don't flicker.

@@ -21,6 +21,14 @@ h2 { margin: 0; font-size: 24px; }
   width: 54px; height: 54px; border-radius: 50%; background: var(--c); color: #fff; font-size: 27px;
   box-shadow: 0 3px 0 rgba(0, 0, 0, .12); }
 button.face:active { transform: scale(.94); }
+/* a good deed's count today on a face; tapping it takes one away */
+.face-wrap { position: relative; display: inline-flex; flex: none; }
+.badge { position: absolute; top: -10px; right: -10px; z-index: 2; min-width: 34px; height: 34px; padding: 0 6px;
+  display: flex; align-items: center; justify-content: center; border-radius: 17px; border: 3px solid #fff;
+  background: var(--ink); color: #fff; font-size: 16px; font-weight: 800; }
+.badge::after { content: "−"; position: absolute; left: -9px; top: 50%; transform: translateY(-50%);
+  width: 16px; height: 16px; border-radius: 50%; background: #fff; color: var(--ink);
+  font-size: 14px; line-height: 15px; text-align: center; box-shadow: 0 1px 2px rgba(0, 0, 0, .3); }
 .face.done { background: #e9f8f0; color: var(--good); font-weight: 900; box-shadow: inset 0 0 0 3px var(--good); }
 
 /* top strip */
@@ -79,6 +87,26 @@ button.face:active { transform: scale(.94); }
 .today-row .amount { font-size: 22px; }
 .pill { flex: none; background: var(--bg); border-radius: 999px; padding: 12px 20px; min-height: 48px;
   font-size: 18px; font-weight: 700; box-shadow: inset 0 0 0 2px var(--line); }
+
+/* the Spend sheet: whose pebbles, then reward tiles */
+.spend-sheet { max-width: 900px; }
+.spend-who { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.spend-who .ask { font-size: 20px; width: 100%; }
+.who-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 18px 6px 6px; }
+.who-pill .face { width: 40px; height: 40px; font-size: 22px; }
+.who-pill.on { background: var(--ink); color: #fff; box-shadow: none; }
+.spendable { margin: 0 4px 12px; font-size: 18px; color: var(--muted); }
+.spendable b { color: var(--ink); font-size: 22px; }
+.tiles { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.tile { background: var(--card); border-radius: 22px; padding: 14px 10px; min-height: 150px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  box-shadow: 0 2px 0 var(--line), 0 6px 18px rgba(80, 60, 20, .06); }
+button.tile:active { transform: scale(.96); }
+.tile .em { font-size: 64px; line-height: 1; }
+.tile .lbl { font-size: 17px; font-weight: 700; text-align: center; }
+.tile .price { font-size: 20px; }
+.tile.locked { opacity: .55; filter: grayscale(.8); }
+.tile .lockline { font-size: 14px; font-weight: 700; color: var(--muted); }
 
 /* phones: smaller faces so four still fit next to the label */
 @media (max-width: 600px) {

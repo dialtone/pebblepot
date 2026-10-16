@@ -1,0 +1,43 @@
+{#- The Spend sheet over the board: pick whose pebbles, then tap a reward to redeem it at once.
+    Rewards beyond what can be spent are locked with "🔒 N more to go". #}
+<div class="sheet-bg" id="spend{% if let Some(m) = spend.member %}-{{ m.id }}{% endif %}"
+     data-spend-sheet="{% if let Some(m) = spend.member %}{{ m.id }}{% endif %}"{% if spend.oob %} hx-swap-oob="true"{% endif %}
+     hx-on:click="if (event.target === this) this.remove()">
+  <div class="sheet spend-sheet" role="dialog" aria-label="Spend pebbles">
+    <div class="sheet-head">
+      <h2>🎁 Spend pebbles</h2>
+      <button type="button" class="x" aria-label="Close" data-close hx-on:click="this.closest('.sheet-bg').remove()">✕</button>
+    </div>
+    <div class="spend-who">
+      {%- if spend.member.is_none() %}<b class="ask">Whose pebbles?</b>{% endif %}
+      {%- for p in spend.picker %}
+      <button type="button" class="pill who-pill{% if let Some(m) = spend.member %}{% if m.id == p.id %} on{% endif %}{% endif %}"
+              data-spend-for="{{ p.id }}" data-member-name="{{ p.name }}"
+              hx-get="{{ crate::web::SPEND_PATH }}?member={{ p.id }}" hx-target="#sheet">
+        <span class="face" style="--c: {{ p.colour }}">{{ p.face }}</span> {{ p.name }} · {{ p.pot }}</button>
+      {%- endfor %}
+    </div>
+    {%- if let Some(m) = spend.member %}
+    {#- Live refresh sends this along so an open sheet is redrawn after a change on any device. #}
+    <input type="hidden" name="spend" value="{{ m.id }}" data-spend-member>
+    <p class="spendable" data-spendable="{{ spend.spendable }}">{{ m.name }} has <b>{{ spend.spendable }}</b> to spend</p>
+    <div class="tiles">
+      {%- for r in spend.rewards %}
+      {%- if let Some(short) = r.more_to_go %}
+      <div class="tile locked" data-reward="{{ r.id }}" data-reward-name="{{ r.name }}" data-price="{{ r.price }}"
+           data-state="locked" data-more-to-go="{{ short }}" aria-disabled="true">
+        <span class="em">{{ r.picture }}</span><span class="lbl">{{ r.name }}</span><b class="price">{{ r.price }}</b>
+        <span class="lockline">🔒 {{ short }} more to go</span>
+      </div>
+      {%- else %}
+      <button type="button" class="tile" data-reward="{{ r.id }}" data-reward-name="{{ r.name }}" data-price="{{ r.price }}"
+              data-state="unlocked" hx-post="{{ crate::web::REDEEM_PATH }}"
+              hx-vals='{"member": {{ m.id }}, "item": {{ r.id }}}' hx-swap="none">
+        <span class="em">{{ r.picture }}</span><span class="lbl">{{ r.name }}</span><b class="price">{{ r.price }}</b>
+      </button>
+      {%- endif %}
+      {%- endfor %}
+    </div>
+    {%- endif %}
+  </div>
+</div>

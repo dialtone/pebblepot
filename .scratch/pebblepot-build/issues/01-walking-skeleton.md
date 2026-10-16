@@ -14,7 +14,7 @@ This ticket also builds the foundations every later ticket uses:
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Spec: [Pebblepot v1](../../pebblepot-v1/spec.md)
 
@@ -27,7 +27,7 @@ Spec: [Pebblepot v1](../../pebblepot-v1/spec.md)
 
 ## Comments
 
-**2026-10-15, implemented** (not committed yet):
+**2026-10-15, implemented** (merged to main in PR #1, e88210d):
 - 6 unit tests (config defaults and overrides, local day, test clock, migrations) and 6 HTTP-seam tests (seed and board content, face buttons, no reseed on restart, cross-origin POST → 403, assets). A mutation check confirmed the restart test catches a broken seed guard.
 - Checked by hand: `cargo run` with no setup serves 127.0.0.1:8070 and creates `./data`, which is now in `.gitignore`. With `PEBBLEPOT_LISTEN_ADDR=0.0.0.0` the board is reachable on the LAN IP. A bad setting exits with a clear message. The layout was checked in iPad landscape, iPad portrait and phone.
 - Environment variables: `PEBBLEPOT_LISTEN_ADDR`, `PEBBLEPOT_PORT`, `PEBBLEPOT_DATA_DIR`, `PEBBLEPOT_TIME_ZONE`.

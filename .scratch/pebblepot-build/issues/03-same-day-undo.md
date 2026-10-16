@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Spec: [Pebblepot v1](../../pebblepot-v1/spec.md)
 
@@ -17,7 +17,7 @@ Spec: [Pebblepot v1](../../pebblepot-v1/spec.md)
 
 ## Comments
 
-**2026-10-15, implementation (not committed yet in the user's repo):**
+**2026-10-15, implementation** (merged to main in PR #1, e88210d):
 
 - Rules: `rules::undo_entry(store, now, tz, entry_id)` deletes the log entry in one immediate transaction, only if its `local_day` is today in the household time zone. Refusals: `not_undoable` (earlier day), `unknown_entry` (already undone). No pot check, so undo may leave a pot below zero, as the spec's Further Notes allow (not reachable until redeem exists). `earn_chore` now returns the new entry id for the toast.
 - Read model: `board.done` maps (member, item) to today's entry id, so each ✓ knows which entry it undoes. New `board::today_list(store, member, today)`: today's entries, most recent first.
