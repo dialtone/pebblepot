@@ -1,0 +1,8 @@
+{%- if let Some(item) = item %}
+{% include "row.html" %}
+{%- endif %}
+{% include "pots.html" %}
+{%- if let Some(today) = today %}
+{% include "today.html" %}
+{%- endif %}
+{% include "toast.html" %}

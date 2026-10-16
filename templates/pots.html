@@ -1,0 +1,11 @@
+<header id="pots" class="pots" data-pots{% if oob %} hx-swap-oob="true"{% endif %}>
+  {%- for m in members %}
+  <button type="button" class="pot" data-member="{{ m.id }}" data-member-name="{{ m.name }}" data-pot="{{ m.pot }}"
+          hx-get="{{ crate::web::TODAY_PATH }}?member={{ m.id }}" hx-target="#sheet">
+    <span class="who"><span class="face" style="--c: {{ m.colour }}">{{ m.face }}</span><b>{{ m.name }}</b></span>
+    <span class="dots">{% for colour in m.pot_dots %}<span class="pebble" style="background: {{ colour }}"></span>{% endfor %}</span>
+    <span class="num">{{ m.pot }}</span>
+  </button>
+  {%- endfor %}
+  <button type="button" class="spend" data-spend><span class="em">🎁</span> Spend</button>
+</header>

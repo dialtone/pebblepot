@@ -1,0 +1,21 @@
+<div class="row" id="row-{{ item.id }}" data-item="{{ item.id }}" data-item-name="{{ item.name }}" data-value="{{ item.value }}"{% if item.oob %} hx-swap-oob="true"{% endif %}>
+  <span class="picture">{{ item.picture }}</span>
+  <span class="label"><b>{{ item.name }}</b><span class="dots">{% for colour in item.dots %}<span class="pebble" style="background: {{ colour }}"></span>{% endfor %}</span></span>
+  <span class="faces">
+    {%- for f in item.faces %}
+    {%- if let Some(entry) = f.done_entry %}
+    <button type="button" class="face done" data-face-for="{{ f.member_id }}" data-done data-undo-entry="{{ entry }}"
+            style="--c: {{ f.colour }}" aria-label="{{ f.name }}: done today, tap to undo"
+            hx-post="{{ crate::web::UNDO_PATH }}" hx-vals='{"entry": {{ entry }}, "item": {{ item.id }}}'
+            hx-swap="none">✓</button>
+    {%- else %}
+    <button type="button" class="face" data-face-for="{{ f.member_id }}"
+            style="--c: {{ f.colour }}" aria-label="{{ f.name }}"
+            {%- if let Some(path) = item.earn_path %}
+            hx-post="{{ path }}" hx-vals='{"member": {{ f.member_id }}, "item": {{ item.id }}}'
+            hx-target="closest .row" hx-swap="outerHTML"
+            {%- endif %}>{{ f.face }}</button>
+    {%- endif %}
+    {%- endfor %}
+  </span>
+</div>

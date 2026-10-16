@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pebblepot</title>
+<link rel="stylesheet" href="{{ css_path }}">
+<script src="{{ htmx_path }}" defer></script>
+<script src="{{ sse_ext_path }}" defer></script>
+<script src="{{ live_js_path }}" defer></script>
+</head>
+<body>
+<main class="board">
+  {#- Data attributes are the stable markers tests rely on; keep them when changing layout. #}
+  {% include "pots.html" %}
+
+  {%- for section in sections %}
+  <section class="section" data-section="{{ section.key }}">
+    <h2>{{ section.title }}</h2>
+    {%- if section.searchable %}
+    <input type="search" name="q" class="search" placeholder="Type to find a job… (wash, leaves, laundry)"
+           autocomplete="off" hx-get="{{ occasional_rows_path }}" hx-trigger="input changed delay:150ms, search"
+           hx-target="#rows-{{ section.key }}" data-search>
+    {%- endif %}
+    <div class="rows" id="rows-{{ section.key }}">
+      {%- for item in section.items %}
+      {% include "row.html" %}
+      {%- endfor %}
+    </div>
+  </section>
+  {%- endfor %}
+</main>
+<div id="sheet"></div>
+<div id="toast" class="toast" aria-live="polite"></div>
+{#- Live sync: one event stream; each `changed` refetches pots and rows (keeping the Other jobs search). #}
+<div id="live" hidden hx-ext="sse" sse-connect="{{ events_path }}" hx-get="{{ board_refresh_path }}"
+     hx-trigger="sse:changed, refresh" hx-include="[data-search]" hx-swap="none" hx-sync="this:replace"></div>
+</body>
+</html>
