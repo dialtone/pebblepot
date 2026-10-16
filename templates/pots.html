@@ -26,4 +26,6 @@
   {%- endif %}
   {%- endfor %}
   <button type="button" class="spend" data-spend hx-get="{{ crate::web::SPEND_PATH }}" hx-target="#sheet"><span class="em">🎁</span> Spend</button>
+  {#- ✏️ Edit mode is the board at `/?edit=1`; hidden while editing, where ✓ Done leaves it. #}
+  <a class="edit-toggle" href="/?edit=1" data-edit-toggle aria-label="Edit the board">✏️ Edit</a>
 </header>

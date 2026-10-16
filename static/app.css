@@ -165,3 +165,31 @@ button.tile:active { transform: scale(.96); }
 .keep input { width: 28px; height: 28px; accent-color: var(--good); }
 .give { width: 100%; padding: 16px; border-radius: 999px; background: var(--good); color: #fff; font-size: 24px; font-weight: 800; }
 .give:disabled { opacity: .6; }
+
+/* ✏️ Edit mode: the toggle in the top strip, then a drag handle, pencil and 🗑 on every row */
+.edit-toggle { flex: none; display: flex; align-items: center; background: var(--card); border-radius: 22px;
+  padding: 10px 18px; font-size: 20px; font-weight: 800; color: inherit; text-decoration: none; box-shadow: 0 2px 0 var(--line); }
+.board.editing .edit-toggle { display: none; }
+.edit-hint { margin: 4px 4px 0; font-size: 18px; font-weight: 700; color: var(--muted); }
+.edit-done { position: fixed; z-index: 15; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+  background: var(--ink); color: #fff; text-decoration: none; border-radius: 999px; padding: 16px 30px;
+  font-size: 22px; font-weight: 800; white-space: nowrap; box-shadow: 0 8px 24px rgba(0, 0, 0, .25); }
+.board.editing { padding-bottom: 100px; }
+.row.editing { gap: 10px; }
+.handle { flex: none; width: 44px; height: 56px; font-size: 30px; color: var(--muted); cursor: grab; touch-action: none; }
+.row.dragging { opacity: .8; box-shadow: 0 0 0 3px var(--ink), 0 10px 24px rgba(0, 0, 0, .18); }
+.edit-tools { display: flex; gap: 8px; flex: none; }
+.tool { width: 56px; height: 56px; border-radius: 50%; font-size: 26px; background: var(--bg); box-shadow: inset 0 0 0 2px var(--line); }
+.tool.retire { background: #fff1ee; }
+.how-often { display: flex; gap: 12px; }
+.often-choice { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px; border-radius: 18px;
+  background: var(--card); box-shadow: inset 0 0 0 2px var(--line); font-size: 18px; cursor: pointer; }
+.often-choice input { position: absolute; opacity: 0; pointer-events: none; }
+.often-choice:has(input:checked) { box-shadow: inset 0 0 0 3px var(--ink); }
+@media (max-width: 600px) {
+  .edit-toggle { flex: 1 1 0; justify-content: center; }
+  .spend { flex: 2 1 0; }
+  .row.editing { flex-wrap: nowrap; }
+  .row.editing .picture { font-size: 34px; width: 40px; }
+  .tool { width: 48px; height: 48px; font-size: 22px; }
+}

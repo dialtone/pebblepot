@@ -1,0 +1,36 @@
+{#- ✏️ The pencil sheet in edit mode: change a chore's or good deed's name, picture and pebble value,
+    and move a chore between ☀️ daily and 🧺 occasional. Past log entries keep their own copies. #}
+<div class="sheet-bg" id="edit-item" data-edit-sheet="{{ id }}"
+     hx-on:click="if (event.target === this) this.remove()">
+  <div class="sheet" role="dialog" aria-label="Change {{ name }}">
+    <div class="sheet-head">
+      <h2>✏️ Change <span class="muted">· {{ section_title }}</span></h2>
+      <button type="button" class="x" aria-label="Close" data-close hx-on:click="this.closest('.sheet-bg').remove()">✕</button>
+    </div>
+    <form class="something-else" hx-post="{{ crate::web::ITEM_EDIT_PATH }}" hx-swap="none"
+          hx-include="[data-search]" hx-disabled-elt="find button[type=submit]">
+      <input type="hidden" name="item" value="{{ id }}">
+      <div class="what">
+        <input type="text" name="picture" class="picture-input" value="{{ picture }}" maxlength="16"
+               aria-label="Picture" autocomplete="off">
+        <input type="text" name="name" class="search" value="{{ name }}" required maxlength="80" autocomplete="off"
+               aria-label="Name">
+      </div>
+      <div class="stepper">
+        <button type="button" class="x" aria-label="One fewer" hx-on:click="this.form.elements.value.stepDown()">−</button>
+        <label><input type="number" name="value" value="{{ value }}" min="{{ min_value }}" max="{{ max_value }}"
+               inputmode="numeric" aria-label="Pebbles"> pebbles</label>
+        <button type="button" class="x" aria-label="One more" hx-on:click="this.form.elements.value.stepUp()">+</button>
+      </div>
+      {%- if chore %}
+      <div class="how-often" role="radiogroup" aria-label="How often?">
+        <label class="often-choice"><input type="radio" name="section" value="daily_chores"{% if daily %} checked{% endif %}>
+          <b>☀️ Every day</b><span class="muted">Today's jobs</span></label>
+        <label class="often-choice"><input type="radio" name="section" value="occasional_chores"{% if !daily %} checked{% endif %}>
+          <b>🧺 Now and then</b><span class="muted">Other jobs</span></label>
+      </div>
+      {%- endif %}
+      <button type="submit" class="give">Save</button>
+    </form>
+  </div>
+</div>

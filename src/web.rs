@@ -35,6 +35,8 @@ pub const SSE_EXT_PATH: &str = "/static/htmx-ext-sse-2.2.4.min.js";
 const SSE_EXT_JS: &str = include_str!("../static/htmx-ext-sse-2.2.4.min.js");
 pub const LIVE_JS_PATH: &str = "/static/live.js";
 const LIVE_JS: &str = include_str!("../static/live.js");
+pub const REORDER_JS_PATH: &str = "/static/reorder.js";
+const REORDER_JS: &str = include_str!("../static/reorder.js");
 
 /// Pebble colours, cycled through when drawing dots.
 const PEBBLE_COLOURS: [&str; 8] = [
@@ -72,6 +74,13 @@ pub fn router(state: AppState) -> Router {
         .route(
             SOMETHING_ELSE_PATH,
             get(something_else_sheet).post(something_else),
+        )
+        .route(ITEM_EDIT_PATH, get(item_edit_sheet).post(edit_item))
+        .route(ITEM_RETIRE_PATH, post(retire_item))
+        .route(ITEM_REORDER_PATH, post(reorder_items))
+        .route(
+            REORDER_JS_PATH,
+            get(|| async { asset(REORDER_JS, "text/javascript", "no-cache") }),
         )
         .route(
             SSE_EXT_PATH,
@@ -255,6 +264,14 @@ pub const GOAL_GOT_IT_PATH: &str = "/goal/got-it";
 /// `name`, `picture`, `value` (default 1), `keep` (the Keep on the board checkbox) and the Other
 /// jobs search `q`: earn it, adding it to the section if kept.
 pub const SOMETHING_ELSE_PATH: &str = "/something-else";
+/// GET `?item=<id>`: the ✏️ pencil sheet for a chore or good deed on the board. POST `item`, `name`,
+/// `picture`, `value` and, for a chore, `section` (`daily_chores` or `occasional_chores`), plus the
+/// Other jobs search `q`: change it.
+pub const ITEM_EDIT_PATH: &str = "/item/edit";
+/// POST `item=<id>` (and the search `q`): 🗑 retire a chore or good deed.
+pub const ITEM_RETIRE_PATH: &str = "/item/retire";
+/// POST `section=<key>&order=<id>,<id>,…` (and the search `q`): a dragged row was dropped.
+pub const ITEM_REORDER_PATH: &str = "/item/reorder";
 
 struct MemberView {
     id: i64,
@@ -317,6 +334,9 @@ struct ItemView {
     faces: Vec<FaceView>,
     /// Swapped in out of band (by id) rather than as the reply's target.
     oob: bool,
+    /// In ✏️ Edit mode: the section key its drag handle reorders. The row then shows a drag handle,
+    /// a pencil and 🗑 Retire instead of faces.
+    edit_section: Option<&'static str>,
 }
 
 struct SectionView {
@@ -434,6 +454,52 @@ fn item_view(board: &Board, section: Section, item: &Item) -> ItemView {
             })
             .collect(),
         oob: false,
+        edit_section: None,
+    }
+}
+
+/// A section's rows, the Other jobs search applied, as the board shows them (or in ✏️ Edit mode).
+fn section_view(board: &Board, section: Section, query: &str, editing: bool) -> SectionView {
+    SectionView {
+        key: section.key(),
+        title: section.title(),
+        searchable: section == Section::OccasionalChores,
+        items: section_items(board, section)
+            .iter()
+            .filter(|item| section != Section::OccasionalChores || matches_search(item, query))
+            .map(|item| ItemView {
+                edit_section: editing.then(|| section.key()),
+                ..item_view(board, section, item)
+            })
+            .collect(),
+    }
+}
+
+const SECTIONS: [Section; 3] = [
+    Section::DailyChores,
+    Section::GoodDeeds,
+    Section::OccasionalChores,
+];
+
+/// The section a chore or good deed on the board is in, with the item.
+fn find_on_board(board: &Board, item_id: i64) -> Option<(Section, &Item)> {
+    SECTIONS.into_iter().find_map(|section| {
+        section_items(board, section)
+            .iter()
+            .find(|item| item.id == item_id)
+            .map(|item| (section, item))
+    })
+}
+
+/// ✏️ Edit mode is on for a request that carries `edit` (the board's `[data-edit-mode]` marker).
+#[derive(Deserialize)]
+struct EditMode {
+    edit: Option<String>,
+}
+
+impl EditMode {
+    fn on(&self) -> bool {
+        self.edit.as_deref().is_some_and(|v| !v.is_empty())
     }
 }
 
@@ -458,11 +524,14 @@ struct BoardPage {
     css_path: &'static str,
     sse_ext_path: &'static str,
     live_js_path: &'static str,
+    reorder_js_path: &'static str,
     events_path: &'static str,
     board_refresh_path: &'static str,
     occasional_rows_path: &'static str,
     members: Vec<MemberView>,
     sections: Vec<SectionView>,
+    /// ✏️ Edit mode: rows can be changed, reordered and retired instead of earned.
+    editing: bool,
     oob: bool,
 }
 
@@ -512,34 +581,27 @@ fn render(t: impl Template) -> Result<Html<String>, AppError> {
     t.render().map(Html).map_err(|e| AppError(e.into()))
 }
 
-async fn board_page(State(state): State<AppState>) -> Result<Html<String>, AppError> {
+async fn board_page(
+    State(state): State<AppState>,
+    Query(mode): Query<EditMode>,
+) -> Result<Html<String>, AppError> {
     let board = board::load(&state.store, state.today()).await?;
-    let sections = [
-        Section::DailyChores,
-        Section::GoodDeeds,
-        Section::OccasionalChores,
-    ]
-    .into_iter()
-    .map(|section| SectionView {
-        key: section.key(),
-        title: section.title(),
-        searchable: section == Section::OccasionalChores,
-        items: section_items(&board, section)
-            .iter()
-            .map(|item| item_view(&board, section, item))
-            .collect(),
-    })
-    .collect();
+    let sections = SECTIONS
+        .into_iter()
+        .map(|section| section_view(&board, section, "", mode.on()))
+        .collect();
     render(BoardPage {
         htmx_path: HTMX_PATH,
         css_path: CSS_PATH,
         sse_ext_path: SSE_EXT_PATH,
         live_js_path: LIVE_JS_PATH,
+        reorder_js_path: REORDER_JS_PATH,
         events_path: EVENTS_PATH,
         board_refresh_path: BOARD_REFRESH_PATH,
         occasional_rows_path: OCCASIONAL_ROWS_PATH,
         members: member_views(&board),
         sections,
+        editing: mode.on(),
         oob: false,
     })
 }
@@ -553,14 +615,10 @@ struct SearchQuery {
 async fn occasional_rows(
     State(state): State<AppState>,
     Query(search): Query<SearchQuery>,
+    Query(mode): Query<EditMode>,
 ) -> Result<Html<String>, AppError> {
     let board = board::load(&state.store, state.today()).await?;
-    let items = board
-        .occasional_chores
-        .iter()
-        .filter(|item| matches_search(item, &search.q))
-        .map(|item| item_view(&board, Section::OccasionalChores, item))
-        .collect();
+    let items = section_view(&board, Section::OccasionalChores, &search.q, mode.on()).items;
     render(RowsPartial { items })
 }
 
@@ -707,25 +765,13 @@ async fn board_refresh(
     State(state): State<AppState>,
     Query(search): Query<SearchQuery>,
     Query(open): Query<OpenSheets>,
+    Query(mode): Query<EditMode>,
 ) -> Result<Html<String>, AppError> {
     let board = board::load(&state.store, state.today()).await?;
-    let sections = [
-        Section::DailyChores,
-        Section::GoodDeeds,
-        Section::OccasionalChores,
-    ]
-    .into_iter()
-    .map(|section| SectionView {
-        key: section.key(),
-        title: section.title(),
-        searchable: section == Section::OccasionalChores,
-        items: section_items(&board, section)
-            .iter()
-            .filter(|item| section != Section::OccasionalChores || matches_search(item, &search.q))
-            .map(|item| item_view(&board, section, item))
-            .collect(),
-    })
-    .collect();
+    let sections = SECTIONS
+        .into_iter()
+        .map(|section| section_view(&board, section, &search.q, mode.on()))
+        .collect();
     let spend = match open.spend {
         Some(member) => spend_view(&board, &board::rewards(&state.store).await?, Some(member)),
         None => None,
@@ -1101,4 +1147,207 @@ async fn something_else(
         oob: true,
     })?
     .into_response())
+}
+
+/// The ✏️ pencil sheet: name, picture, pebble value and, for a chore, daily or occasional.
+#[derive(Template)]
+#[template(path = "item_edit.html")]
+struct ItemEditSheet {
+    id: i64,
+    name: String,
+    picture: String,
+    value: i64,
+    section_title: &'static str,
+    /// A chore can switch between ☀️ daily and 🧺 occasional; a good deed stays a good deed.
+    chore: bool,
+    daily: bool,
+    min_value: i64,
+    max_value: i64,
+}
+
+#[derive(Deserialize)]
+struct ItemQuery {
+    item: i64,
+}
+
+async fn item_edit_sheet(
+    State(state): State<AppState>,
+    Query(query): Query<ItemQuery>,
+) -> Result<Response, AppError> {
+    let board = board::load(&state.store, state.today()).await?;
+    let Some((section, item)) = find_on_board(&board, query.item) else {
+        return Ok((StatusCode::NOT_FOUND, Refusal::UnknownItem.message()).into_response());
+    };
+    Ok(render(ItemEditSheet {
+        id: item.id,
+        name: item.name.clone(),
+        picture: item.picture.clone(),
+        value: item.value,
+        section_title: section.title(),
+        chore: section.is_chores(),
+        daily: section == Section::DailyChores,
+        min_value: *rules::SOMETHING_ELSE_VALUES.start(),
+        max_value: *rules::SOMETHING_ELSE_VALUES.end(),
+    })?
+    .into_response())
+}
+
+/// The reply to an edit-mode command: every section's rows redrawn in edit mode (keeping the Other
+/// jobs search), all out of band, plus a toast and, when a sheet is done with, an empty `#sheet`.
+/// A refused change is just the toast, so the pencil sheet stays open to be fixed.
+#[derive(Template)]
+#[template(path = "edit_response.html")]
+struct EditResponse {
+    sections: Vec<SectionView>,
+    close_sheet: bool,
+    toast: Option<ToastView>,
+}
+
+async fn edit_reply(
+    state: &AppState,
+    query: &str,
+    close_sheet: bool,
+    toast: Option<ToastView>,
+) -> Result<Response, AppError> {
+    let board = board::load(&state.store, state.today()).await?;
+    let sections = SECTIONS
+        .into_iter()
+        .map(|section| section_view(&board, section, query, true))
+        .collect();
+    Ok(render(EditResponse {
+        sections,
+        close_sheet,
+        toast,
+    })?
+    .into_response())
+}
+
+fn refusal_reply(refusal: Refusal) -> Result<Response, AppError> {
+    Ok(render(EditResponse {
+        sections: Vec::new(),
+        close_sheet: false,
+        toast: Some(ToastView::refused(refusal)),
+    })?
+    .into_response())
+}
+
+/// The pencil sheet's form. Numbers arrive as text so a blank or garbled value becomes a refusal.
+#[derive(Deserialize)]
+struct ItemEditForm {
+    item: i64,
+    /// Only a chore's sheet sends this: where it goes, daily or occasional.
+    section: Option<String>,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    picture: String,
+    #[serde(default)]
+    value: String,
+    #[serde(default)]
+    q: String,
+}
+
+async fn edit_item(
+    State(state): State<AppState>,
+    Form(form): Form<ItemEditForm>,
+) -> Result<Response, AppError> {
+    let board = board::load(&state.store, state.today()).await?;
+    let Some((current, _)) = find_on_board(&board, form.item) else {
+        return Ok((StatusCode::NOT_FOUND, Refusal::UnknownItem.message()).into_response());
+    };
+    let section = match form.section.as_deref() {
+        None => current,
+        Some(key) => match Section::from_key(key) {
+            Some(section) => section,
+            None => return Ok((StatusCode::NOT_FOUND, "No such section").into_response()),
+        },
+    };
+    let Ok(value) = form.value.trim().parse() else {
+        return refusal_reply(Refusal::BadValue);
+    };
+    let change = rules::ItemChange {
+        name: form.name,
+        picture: form.picture,
+        value,
+        kind: section.kind(),
+    };
+    match rules::edit_item(&state.store, form.item, change).await {
+        Ok(edited) => {
+            let toast = ToastView {
+                kind: "edited",
+                refusal: "",
+                text: format!("✏️ {} {}", edited.picture, edited.name),
+                undo_entry: None,
+            };
+            edit_reply(&state, &form.q, true, Some(toast)).await
+        }
+        Err(CommandError::Refused(refusal)) => refusal_reply(refusal),
+        Err(CommandError::Store(e)) => Err(AppError(e)),
+    }
+}
+
+#[derive(Deserialize)]
+struct RetireForm {
+    item: i64,
+    #[serde(default)]
+    q: String,
+}
+
+async fn retire_item(
+    State(state): State<AppState>,
+    Form(form): Form<RetireForm>,
+) -> Result<Response, AppError> {
+    let board = board::load(&state.store, state.today()).await?;
+    if find_on_board(&board, form.item).is_none() {
+        return Ok((StatusCode::NOT_FOUND, Refusal::UnknownItem.message()).into_response());
+    }
+    match rules::retire_item(&state.store, form.item).await {
+        Ok(retired) => {
+            let toast = ToastView {
+                kind: "retired",
+                refusal: "",
+                text: format!("🗑 {} {} retired", retired.picture, retired.name),
+                undo_entry: None,
+            };
+            edit_reply(&state, &form.q, false, Some(toast)).await
+        }
+        Err(CommandError::Refused(refusal)) => refusal_reply(refusal),
+        Err(CommandError::Store(e)) => Err(AppError(e)),
+    }
+}
+
+#[derive(Deserialize)]
+struct ReorderForm {
+    section: String,
+    #[serde(default)]
+    order: String,
+    #[serde(default)]
+    q: String,
+}
+
+/// A dropped row. The rows are always redrawn, so a refused drop snaps back to the real order.
+async fn reorder_items(
+    State(state): State<AppState>,
+    Form(form): Form<ReorderForm>,
+) -> Result<Response, AppError> {
+    let Some(section) = Section::from_key(&form.section) else {
+        return Ok((StatusCode::NOT_FOUND, "No such section").into_response());
+    };
+    let order = form
+        .order
+        .split(',')
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::parse)
+        .collect::<Result<Vec<i64>, _>>();
+    let result = match order {
+        Ok(order) => rules::reorder_items(&state.store, section.kind(), order).await,
+        Err(_) => Err(CommandError::Refused(Refusal::UnknownItem)),
+    };
+    let toast = match result {
+        Ok(()) => None,
+        Err(CommandError::Refused(refusal)) => Some(ToastView::refused(refusal)),
+        Err(CommandError::Store(e)) => return Err(AppError(e)),
+    };
+    edit_reply(&state, &form.q, false, toast).await
 }

@@ -765,3 +765,185 @@ pub async fn earn_something_else(
         .await?;
     outcome.map_err(CommandError::Refused)
 }
+
+// ✏️ Edit mode. Items are changed in place and retired rather than deleted. Log entries and goals
+// keep their own copies of the name, picture and amount, so none of these touch a pot or the past.
+
+/// What an item is changed to with the ✏️ pencil.
+#[derive(Clone, Debug)]
+pub struct ItemChange {
+    pub name: String,
+    /// Blank becomes ✨, as for Something else.
+    pub picture: String,
+    /// Pebbles earned (or a reward's price), within `SOMETHING_ELSE_VALUES`.
+    pub value: i64,
+    /// The item's kind afterwards. Only a chore can change kind: daily ⇄ occasional.
+    pub kind: ItemKind,
+}
+
+/// An item as it was just changed or retired.
+#[derive(Clone, Debug)]
+pub struct EditedItem {
+    pub item_id: i64,
+    pub name: String,
+    pub picture: String,
+    /// Its kind before the change (a daily ⇄ occasional switch moves it between sections).
+    pub was: ItemKind,
+    pub kind: ItemKind,
+}
+
+fn is_chore(kind: ItemKind) -> bool {
+    matches!(kind, ItemKind::DailyChore | ItemKind::OccasionalChore)
+}
+
+fn kind_from_str(kind: &str) -> Option<ItemKind> {
+    [
+        ItemKind::DailyChore,
+        ItemKind::OccasionalChore,
+        ItemKind::GoodDeed,
+        ItemKind::Reward,
+    ]
+    .into_iter()
+    .find(|k| k.as_str() == kind)
+}
+
+/// The kind of an active (not retired) item, read inside the caller's transaction.
+fn active_item_kind(
+    tx: &rusqlite::Transaction,
+    item_id: i64,
+) -> rusqlite::Result<Option<ItemKind>> {
+    let kind: Option<String> = tx
+        .query_row(
+            "SELECT kind FROM item WHERE id = ?1 AND retired = 0",
+            [item_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(kind.as_deref().and_then(kind_from_str))
+}
+
+/// ✏️ Change an item's name, picture and value, and switch a chore between daily and occasional.
+/// A chore that switches goes to the end of its new section. Today's ✓s and the once-a-day rule
+/// follow the item, since they key on it. Log entries already written keep their own copies.
+pub async fn edit_item(
+    store: &Store,
+    item_id: i64,
+    change: ItemChange,
+) -> Result<EditedItem, CommandError> {
+    let name = change.name.trim().to_string();
+    if name.is_empty() {
+        return Err(CommandError::Refused(Refusal::NameNeeded));
+    }
+    if !SOMETHING_ELSE_VALUES.contains(&change.value) {
+        return Err(CommandError::Refused(Refusal::BadValue));
+    }
+    let picture = match change.picture.trim() {
+        "" => SOMETHING_ELSE_PICTURE.to_string(),
+        picture => picture.to_string(),
+    };
+    let (value, kind) = (change.value, change.kind);
+    let outcome = store
+        .call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let Some(was) = active_item_kind(&tx, item_id)? else {
+                return Ok(Err(Refusal::UnknownItem));
+            };
+            if was != kind && !(is_chore(was) && is_chore(kind)) {
+                return Ok(Err(Refusal::UnknownItem));
+            }
+            if was == kind {
+                tx.execute(
+                    "UPDATE item SET name = ?1, picture = ?2, value = ?3 WHERE id = ?4",
+                    (&name, &picture, value, item_id),
+                )?;
+            } else {
+                tx.execute(
+                    "UPDATE item SET name = ?1, picture = ?2, value = ?3, kind = ?4,
+                         position = (SELECT COALESCE(MAX(position), 0) + 1 FROM item WHERE kind = ?4)
+                     WHERE id = ?5",
+                    (&name, &picture, value, kind.as_str(), item_id),
+                )?;
+            }
+            tx.commit()?;
+            Ok(Ok(EditedItem {
+                item_id,
+                name,
+                picture,
+                was,
+                kind,
+            }))
+        })
+        .await?;
+    outcome.map_err(CommandError::Refused)
+}
+
+/// 🗑 Retire an item: it leaves the board (and Spend) for good. Nothing is deleted, so its log
+/// entries, and any goal set on it, stay as they were.
+pub async fn retire_item(store: &Store, item_id: i64) -> Result<EditedItem, CommandError> {
+    let outcome = store
+        .call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let item: Option<(String, String, String)> = tx
+                .query_row(
+                    "SELECT name, picture, kind FROM item WHERE id = ?1 AND retired = 0",
+                    [item_id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            let Some((name, picture, kind)) = item else {
+                return Ok(Err(Refusal::UnknownItem));
+            };
+            let kind = kind_from_str(&kind).ok_or("unknown item kind")?;
+            tx.execute("UPDATE item SET retired = 1 WHERE id = ?1", [item_id])?;
+            tx.commit()?;
+            Ok(Ok(EditedItem {
+                item_id,
+                name,
+                picture,
+                was: kind,
+                kind,
+            }))
+        })
+        .await?;
+    outcome.map_err(CommandError::Refused)
+}
+
+/// Drop a dragged row: `order` is the new order of some or all of `kind`'s active items (a
+/// searched list shows only some). Those items swap among the places they already hold, and every
+/// other item keeps its place. Anything retired, of another kind, unknown or repeated is refused.
+pub async fn reorder_items(
+    store: &Store,
+    kind: ItemKind,
+    order: Vec<i64>,
+) -> Result<(), CommandError> {
+    let outcome = store
+        .call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let current = tx
+                .prepare(
+                    "SELECT id FROM item WHERE kind = ?1 AND retired = 0 ORDER BY position, id",
+                )?
+                .query_map([kind.as_str()], |r| r.get::<_, i64>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let moved: std::collections::HashSet<i64> = order.iter().copied().collect();
+            if moved.len() != order.len() || !moved.iter().all(|id| current.contains(id)) {
+                return Ok(Err(Refusal::UnknownItem));
+            }
+            let mut dropped = order.iter();
+            for (position, id) in current.iter().enumerate() {
+                let id = if moved.contains(id) {
+                    *dropped.next().expect("as many places as moved items")
+                } else {
+                    *id
+                };
+                tx.execute(
+                    "UPDATE item SET position = ?1 WHERE id = ?2",
+                    (position as i64 + 1, id),
+                )?;
+            }
+            tx.commit()?;
+            Ok(Ok(()))
+        })
+        .await?;
+    outcome.map_err(CommandError::Refused)
+}

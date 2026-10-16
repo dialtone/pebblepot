@@ -1,3 +1,20 @@
+{%- if let Some(section_key) = item.edit_section %}
+{#- ✏️ Edit mode: a drag handle, the pencil and 🗑 Retire instead of faces. A different id from the
+    normal row, so an earn or undo reply meant for the normal board can't swap faces back in. #}
+<div class="row editing" id="edit-row-{{ item.id }}" data-item="{{ item.id }}" data-item-name="{{ item.name }}" data-value="{{ item.value }}" data-edit-row>
+  <button type="button" class="handle" data-drag-handle data-reorder-section="{{ section_key }}"
+          data-reorder-path="{{ crate::web::ITEM_REORDER_PATH }}" aria-label="Drag {{ item.name }} to move it">⠿</button>
+  <span class="picture">{{ item.picture }}</span>
+  <span class="label"><b>{{ item.name }}</b><span class="dots">{% for colour in item.dots %}<span class="pebble" style="background: {{ colour }}"></span>{% endfor %}</span></span>
+  <span class="edit-tools">
+    <button type="button" class="tool" data-edit-item="{{ item.id }}" aria-label="Change {{ item.name }}"
+            hx-get="{{ crate::web::ITEM_EDIT_PATH }}?item={{ item.id }}" hx-target="#sheet">✏️</button>
+    <button type="button" class="tool retire" data-retire="{{ item.id }}" aria-label="Retire {{ item.name }}"
+            hx-post="{{ crate::web::ITEM_RETIRE_PATH }}" hx-vals='{"item": {{ item.id }}}' hx-include="[data-search]"
+            hx-swap="none" hx-confirm="Retire {{ item.name }}? It leaves the board for good. Pebbles already earned stay.">🗑</button>
+  </span>
+</div>
+{%- else %}
 <div class="row" id="row-{{ item.id }}" data-item="{{ item.id }}" data-item-name="{{ item.name }}" data-value="{{ item.value }}"{% if item.oob %} hx-swap-oob="true"{% endif %}>
   <span class="picture">{{ item.picture }}</span>
   <span class="label"><b>{{ item.name }}</b><span class="dots">{% for colour in item.dots %}<span class="pebble" style="background: {{ colour }}"></span>{% endfor %}</span></span>
@@ -27,3 +44,4 @@
     {%- endfor %}
   </span>
 </div>
+{%- endif %}
