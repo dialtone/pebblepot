@@ -16,7 +16,11 @@
 
   {%- for section in sections %}
   <section class="section" data-section="{{ section.key }}">
-    <h2>{{ section.title }}</h2>
+    <div class="section-head">
+      <h2>{{ section.title }}</h2>
+      <button type="button" class="pill" data-something-else
+              hx-get="{{ crate::web::SOMETHING_ELSE_PATH }}?section={{ section.key }}" hx-target="#sheet">✏️ Something else</button>
+    </div>
     {%- if section.searchable %}
     <input type="search" name="q" class="search" placeholder="Type to find a job… (wash, leaves, laundry)"
            autocomplete="off" hx-get="{{ occasional_rows_path }}" hx-trigger="input changed delay:150ms, search"
