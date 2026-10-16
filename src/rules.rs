@@ -22,6 +22,14 @@ pub enum Refusal {
     RepeatTap,
     /// The reward costs more than the pot holds: an ordinary redeem never takes a pot below zero.
     NotEnoughPebbles,
+    /// Save for this was tapped while already saving for a goal: one goal at a time.
+    GoalAlreadyActive,
+    /// Save for this on a reward the pot already covers: just redeem it.
+    Affordable,
+    /// Give up goal or Got it with no active goal.
+    NoGoal,
+    /// Got it before the pot is back to zero.
+    GoalNotReady,
 }
 
 impl Refusal {
@@ -35,6 +43,10 @@ impl Refusal {
             Refusal::NotUndoable => "not_undoable",
             Refusal::RepeatTap => "repeat_tap",
             Refusal::NotEnoughPebbles => "not_enough_pebbles",
+            Refusal::GoalAlreadyActive => "goal_already_active",
+            Refusal::Affordable => "affordable",
+            Refusal::NoGoal => "no_goal",
+            Refusal::GoalNotReady => "goal_not_ready",
         }
     }
 
@@ -47,6 +59,10 @@ impl Refusal {
             Refusal::NotUndoable => "Only today's entries can be undone",
             Refusal::RepeatTap => "Already counted 👍",
             Refusal::NotEnoughPebbles => "Not enough pebbles yet 🔒",
+            Refusal::GoalAlreadyActive => "Already saving for a goal ⭐",
+            Refusal::Affordable => "Enough pebbles already: just tap it 🎁",
+            Refusal::NoGoal => "Not saving for a goal",
+            Refusal::GoalNotReady => "Not there yet ⭐",
         }
     }
 }
@@ -283,6 +299,7 @@ pub async fn undo_entry(
             if day != today {
                 return Ok(Err(Refusal::NotUndoable));
             }
+            undo_goal_effects(&tx, entry_id)?;
             tx.execute("DELETE FROM log_entry WHERE id = ?1", [entry_id])?;
             tx.commit()?;
             Ok(Ok(undone))
@@ -304,7 +321,8 @@ pub struct Redeemed {
 }
 
 /// A family member redeems a reward: write a redeem entry of −price, allowed only if price ≤ pot,
-/// so an ordinary redeem never takes a pot below zero.
+/// so an ordinary redeem never takes a pot below zero. While saving for a goal, only what's saved
+/// can be spent: price ≤ saved (pot + goal price), so the pot never drops below −goal price.
 pub async fn redeem(
     store: &Store,
     now: Timestamp,
@@ -340,7 +358,9 @@ pub async fn redeem(
             let Some((name, picture, price)) = reward else {
                 return Ok(Err(Refusal::UnknownItem));
             };
-            if price > pot {
+            // With an active goal, only what's saved can be spent: saved = pot + goal price.
+            let spendable = pot + active_goal_price(&tx, member_id)?.unwrap_or(0);
+            if price > spendable {
                 return Ok(Err(Refusal::NotEnoughPebbles));
             }
             tx.execute(
@@ -370,4 +390,239 @@ pub async fn redeem(
         })
         .await?;
     outcome.map_err(CommandError::Refused)
+}
+
+/// The price of `member_id`'s active goal, if they're saving for one.
+fn active_goal_price(tx: &rusqlite::Transaction, member_id: i64) -> rusqlite::Result<Option<i64>> {
+    tx.query_row(
+        "SELECT price FROM goal WHERE member_id = ?1 AND status = 'active'",
+        [member_id],
+        |r| r.get(0),
+    )
+    .optional()
+}
+
+/// Before log entry `entry_id` is undone: undoing a goal's "goal set" entry deletes the goal
+/// entirely (with its refund entry, if it was given up, so no free pebbles are left behind).
+/// Undoing a "goal refund" entry takes the given-up goal back up, unless another goal is active.
+fn undo_goal_effects(tx: &rusqlite::Transaction, entry_id: i64) -> rusqlite::Result<()> {
+    let set: Option<(i64, Option<i64>)> = tx
+        .query_row(
+            "SELECT id, refund_entry_id FROM goal WHERE set_entry_id = ?1",
+            [entry_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    if let Some((goal_id, refund)) = set {
+        tx.execute("DELETE FROM goal WHERE id = ?1", [goal_id])?;
+        if let Some(refund) = refund {
+            tx.execute("DELETE FROM log_entry WHERE id = ?1", [refund])?;
+        }
+        return Ok(());
+    }
+    tx.execute(
+        "UPDATE goal SET status = 'active', refund_entry_id = NULL
+         WHERE refund_entry_id = ?1
+           AND NOT EXISTS (SELECT 1 FROM goal g WHERE g.member_id = goal.member_id AND g.status = 'active')",
+        [entry_id],
+    )?;
+    // Still given up (another goal is active): just unlink the entry being deleted.
+    tx.execute(
+        "UPDATE goal SET refund_entry_id = NULL WHERE refund_entry_id = ?1",
+        [entry_id],
+    )?;
+    Ok(())
+}
+
+/// A goal command that went through.
+#[derive(Clone, Debug)]
+pub struct GoalChanged {
+    pub member_id: i64,
+    pub face: String,
+    pub picture: String,
+    /// The log entry it wrote (offered for undo), if any: −price for a goal set, +price for a
+    /// refund. Got it writes nothing.
+    pub entry_id: Option<i64>,
+    pub amount: i64,
+}
+
+/// ⭐ Save for this: redeem a reward the family member can't afford yet as their goal. Allowed only
+/// if the price is above their pot and they have no active goal. Writes a "goal set" entry of
+/// −price, so the pot goes below zero by the shortfall, and creates the goal.
+pub async fn set_goal(
+    store: &Store,
+    now: Timestamp,
+    time_zone: &TimeZone,
+    member_id: i64,
+    item_id: i64,
+) -> Result<GoalChanged, CommandError> {
+    let today = local_day(now, time_zone).to_string();
+    let created_at = now.to_string();
+    let outcome = store
+        .call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let Some((face, pot)) = member_and_pot(&tx, member_id)? else {
+                return Ok(Err(Refusal::UnknownMember));
+            };
+            let reward: Option<(String, String, i64)> = tx
+                .query_row(
+                    "SELECT name, picture, value FROM item
+                     WHERE id = ?1 AND retired = 0 AND kind = ?2",
+                    (item_id, ItemKind::Reward.as_str()),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            let Some((name, picture, price)) = reward else {
+                return Ok(Err(Refusal::UnknownItem));
+            };
+            if active_goal_price(&tx, member_id)?.is_some() {
+                return Ok(Err(Refusal::GoalAlreadyActive));
+            }
+            if price <= pot {
+                return Ok(Err(Refusal::Affordable));
+            }
+            tx.execute(
+                "INSERT INTO log_entry
+                     (member_id, entry_type, item_id, name, picture, amount, local_day, created_at)
+                 VALUES (?1, 'goal_set', ?2, ?3, ?4, ?5, ?6, ?7)",
+                (
+                    member_id,
+                    item_id,
+                    &name,
+                    &picture,
+                    -price,
+                    &today,
+                    &created_at,
+                ),
+            )?;
+            let entry_id = tx.last_insert_rowid();
+            tx.execute(
+                "INSERT INTO goal (member_id, set_entry_id, item_id, name, picture, price, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active')",
+                (member_id, entry_id, item_id, &name, &picture, price),
+            )?;
+            tx.commit()?;
+            Ok(Ok(GoalChanged {
+                member_id,
+                face,
+                picture,
+                entry_id: Some(entry_id),
+                amount: -price,
+            }))
+        })
+        .await?;
+    outcome.map_err(CommandError::Refused)
+}
+
+/// Give up goal: write a "goal refund" entry of +price and mark the goal given up. The goal-set
+/// entry stays in the log, so history is never rewritten.
+pub async fn give_up_goal(
+    store: &Store,
+    now: Timestamp,
+    time_zone: &TimeZone,
+    member_id: i64,
+) -> Result<GoalChanged, CommandError> {
+    let today = local_day(now, time_zone).to_string();
+    let created_at = now.to_string();
+    let outcome = store
+        .call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let Some((face, _pot)) = member_and_pot(&tx, member_id)? else {
+                return Ok(Err(Refusal::UnknownMember));
+            };
+            let goal: Option<(i64, Option<i64>, String, String, i64)> = tx
+                .query_row(
+                    "SELECT id, item_id, name, picture, price FROM goal
+                     WHERE member_id = ?1 AND status = 'active'",
+                    [member_id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )
+                .optional()?;
+            let Some((goal_id, item_id, name, picture, price)) = goal else {
+                return Ok(Err(Refusal::NoGoal));
+            };
+            tx.execute(
+                "INSERT INTO log_entry
+                     (member_id, entry_type, item_id, name, picture, amount, local_day, created_at)
+                 VALUES (?1, 'goal_refund', ?2, ?3, ?4, ?5, ?6, ?7)",
+                (
+                    member_id,
+                    item_id,
+                    &name,
+                    &picture,
+                    price,
+                    &today,
+                    &created_at,
+                ),
+            )?;
+            let entry_id = tx.last_insert_rowid();
+            tx.execute(
+                "UPDATE goal SET status = 'given_up', refund_entry_id = ?1 WHERE id = ?2",
+                (entry_id, goal_id),
+            )?;
+            tx.commit()?;
+            Ok(Ok(GoalChanged {
+                member_id,
+                face,
+                picture,
+                entry_id: Some(entry_id),
+                amount: price,
+            }))
+        })
+        .await?;
+    outcome.map_err(CommandError::Refused)
+}
+
+/// Got it: the goal reward was handed over. Allowed only when the goal is active and the pot is
+/// back to zero or more (Ready). Writes nothing to the log; the pot shows pebbles again.
+pub async fn hand_over_goal(store: &Store, member_id: i64) -> Result<GoalChanged, CommandError> {
+    let outcome = store
+        .call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let Some((face, pot)) = member_and_pot(&tx, member_id)? else {
+                return Ok(Err(Refusal::UnknownMember));
+            };
+            let goal: Option<(i64, String)> = tx
+                .query_row(
+                    "SELECT id, picture FROM goal WHERE member_id = ?1 AND status = 'active'",
+                    [member_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let Some((goal_id, picture)) = goal else {
+                return Ok(Err(Refusal::NoGoal));
+            };
+            if pot < 0 {
+                return Ok(Err(Refusal::GoalNotReady));
+            }
+            tx.execute(
+                "UPDATE goal SET status = 'handed_over' WHERE id = ?1",
+                [goal_id],
+            )?;
+            tx.commit()?;
+            Ok(Ok(GoalChanged {
+                member_id,
+                face,
+                picture,
+                entry_id: None,
+                amount: 0,
+            }))
+        })
+        .await?;
+    outcome.map_err(CommandError::Refused)
+}
+
+/// An active family member's face and pot, summed inside the caller's transaction.
+fn member_and_pot(
+    tx: &rusqlite::Transaction,
+    member_id: i64,
+) -> rusqlite::Result<Option<(String, i64)>> {
+    tx.query_row(
+        "SELECT m.face,
+                (SELECT COALESCE(SUM(amount), 0) FROM log_entry WHERE member_id = m.id)
+         FROM family_member m WHERE m.id = ?1 AND m.retired = 0",
+        [member_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .optional()
 }

@@ -63,6 +63,9 @@ pub fn router(state: AppState) -> Router {
         .route(UNDO_PATH, post(undo))
         .route(SPEND_PATH, get(spend_sheet))
         .route(REDEEM_PATH, post(redeem))
+        .route(GOAL_SET_PATH, post(set_goal))
+        .route(GOAL_GIVE_UP_PATH, post(give_up_goal))
+        .route(GOAL_GOT_IT_PATH, post(goal_got_it))
         .route(EVENTS_PATH, get(events))
         .route(BOARD_REFRESH_PATH, get(board_refresh))
         .route(
@@ -218,6 +221,12 @@ pub const UNDO_PATH: &str = "/undo";
 pub const SPEND_PATH: &str = "/spend";
 /// POST `member=<id>&item=<id>`: redeem a reward from that person's pot.
 pub const REDEEM_PATH: &str = "/redeem";
+/// POST `member=<id>&item=<id>`: ⭐ Save for this, setting that reward as the person's goal.
+pub const GOAL_SET_PATH: &str = "/goal/set";
+/// POST `member=<id>`: give up that person's goal, refunding its price.
+pub const GOAL_GIVE_UP_PATH: &str = "/goal/give-up";
+/// POST `member=<id>`: Got it, the Ready goal was handed over.
+pub const GOAL_GOT_IT_PATH: &str = "/goal/got-it";
 
 struct MemberView {
     id: i64,
@@ -226,6 +235,37 @@ struct MemberView {
     colour: String,
     pot: i64,
     pot_dots: Vec<&'static str>,
+    /// The goal this person is saving for: their pot card shows it instead of pebbles.
+    goal: Option<GoalView>,
+}
+
+/// A goal as the pot card and the Spend sheet show it.
+struct GoalView {
+    name: String,
+    picture: String,
+    /// pot + price: what can be spent while saving.
+    saved: i64,
+    /// Pebbles until Ready: how far the pot is below zero.
+    to_go: i64,
+    ready: bool,
+    /// How much of the picture is in colour: saved ÷ price, in whole percent (0 to 100).
+    fill: i64,
+}
+
+fn goal_view(goal: &board::Goal, pot: i64) -> GoalView {
+    let saved = goal.saved(pot);
+    GoalView {
+        name: goal.name.clone(),
+        picture: goal.picture.clone(),
+        saved,
+        to_go: (-pot).max(0),
+        ready: goal.is_ready(pot),
+        fill: if goal.price > 0 {
+            (saved * 100 / goal.price).clamp(0, 100)
+        } else {
+            100
+        },
+    }
 }
 
 struct FaceView {
@@ -300,11 +340,24 @@ fn member_view(m: &board::Member) -> MemberView {
         face: m.face.clone(),
         colour: m.colour.clone(),
         pot: m.pot,
+        goal: None,
+    }
+}
+
+/// A family member as the board shows them, with their goal if they're saving for one.
+fn board_member_view(board: &Board, m: &board::Member) -> MemberView {
+    MemberView {
+        goal: board.goals.get(&m.id).map(|g| goal_view(g, m.pot)),
+        ..member_view(m)
     }
 }
 
 fn member_views(board: &Board) -> Vec<MemberView> {
-    board.members.iter().map(member_view).collect()
+    board
+        .members
+        .iter()
+        .map(|m| board_member_view(board, m))
+        .collect()
 }
 
 fn today_list_view(list: &TodayList) -> TodayListView {
@@ -664,6 +717,8 @@ struct RewardView {
     price: i64,
     /// Pebbles still needed, if the reward costs more than can be spent.
     more_to_go: Option<i64>,
+    /// ⭐ Save for this is offered: priced above the pot, and no goal yet.
+    can_save: bool,
 }
 
 /// The Spend sheet: "whose pebbles?", then that person's reward tiles.
@@ -672,7 +727,7 @@ struct SpendView {
     picker: Vec<MemberView>,
     /// Whose pebbles are being spent; no tiles until someone is picked.
     member: Option<MemberView>,
-    /// What can be spent without going below zero (the pot, for now).
+    /// What can be spent: the pot, or what's saved (pot + goal price) during a goal.
     spendable: i64,
     rewards: Vec<RewardView>,
     oob: bool,
@@ -684,10 +739,13 @@ fn spend_view(board: &Board, rewards: &[Item], member: Option<i64>) -> Option<Sp
         Some(id) => Some(board.members.iter().find(|m| m.id == id)?),
         None => None,
     };
-    let spendable = member.map_or(0, |m| m.pot);
+    let member = member.map(|m| board_member_view(board, m));
+    let spendable = member
+        .as_ref()
+        .map_or(0, |m| m.goal.as_ref().map_or(m.pot, |g| g.saved));
+    let saving = member.as_ref().is_some_and(|m| m.goal.is_some());
     Some(SpendView {
         picker: member_views(board),
-        member: member.map(member_view),
         spendable,
         rewards: match member {
             Some(_) => rewards
@@ -698,10 +756,12 @@ fn spend_view(board: &Board, rewards: &[Item], member: Option<i64>) -> Option<Sp
                     picture: r.picture.clone(),
                     price: r.value,
                     more_to_go: (r.value > spendable).then(|| r.value - spendable),
+                    can_save: !saving && r.value > spendable,
                 })
                 .collect(),
             None => Vec::new(),
         },
+        member,
         oob: false,
     })
 }
@@ -799,4 +859,81 @@ async fn earn_good_deed(
         oob: true,
     })?
     .into_response())
+}
+
+#[derive(Deserialize)]
+struct MemberForm {
+    member: i64,
+}
+
+/// The reply to a goal command: like a redeem, everything out of band (pots, the Spend sheet and a
+/// toast), since Save for this and Give up come from the Spend sheet and Got it from a pot card.
+async fn goal_reply(
+    state: &AppState,
+    now: jiff::Timestamp,
+    member: i64,
+    toast: ToastView,
+) -> Result<Html<String>, AppError> {
+    let board = board::load(&state.store, local_day(now, &state.time_zone)).await?;
+    let rewards = board::rewards(&state.store).await?;
+    let spend = spend_view(&board, &rewards, Some(member));
+    render(RedeemResponse {
+        members: member_views(&board),
+        spend: spend.map(|spend| SpendView { oob: true, ..spend }),
+        toast,
+        oob: true,
+    })
+}
+
+fn goal_toast(
+    result: Result<rules::GoalChanged, CommandError>,
+    kind: &'static str,
+    text: impl FnOnce(&rules::GoalChanged) -> String,
+) -> Result<ToastView, AppError> {
+    match result {
+        Ok(changed) => Ok(ToastView {
+            kind,
+            refusal: "",
+            text: text(&changed),
+            undo_entry: changed.entry_id,
+        }),
+        Err(CommandError::Refused(refusal)) => Ok(ToastView::refused(refusal)),
+        Err(CommandError::Store(e)) => Err(AppError(e)),
+    }
+}
+
+async fn set_goal(
+    State(state): State<AppState>,
+    Form(form): Form<EarnForm>,
+) -> Result<Html<String>, AppError> {
+    let now = state.clock.now();
+    let result = rules::set_goal(&state.store, now, &state.time_zone, form.member, form.item).await;
+    let toast = goal_toast(result, "goal_set", |g| {
+        format!("{} {} {} ⭐ Saving!", g.face, g.picture, g.amount)
+    })?;
+    goal_reply(&state, now, form.member, toast).await
+}
+
+async fn give_up_goal(
+    State(state): State<AppState>,
+    Form(form): Form<MemberForm>,
+) -> Result<Html<String>, AppError> {
+    let now = state.clock.now();
+    let result = rules::give_up_goal(&state.store, now, &state.time_zone, form.member).await;
+    let toast = goal_toast(result, "goal_given_up", |g| {
+        format!("{} {} +{}", g.face, g.picture, g.amount)
+    })?;
+    goal_reply(&state, now, form.member, toast).await
+}
+
+async fn goal_got_it(
+    State(state): State<AppState>,
+    Form(form): Form<MemberForm>,
+) -> Result<Html<String>, AppError> {
+    let now = state.clock.now();
+    let result = rules::hand_over_goal(&state.store, form.member).await;
+    let toast = goal_toast(result, "handed_over", |g| {
+        format!("{} {} 🎉", g.face, g.picture)
+    })?;
+    goal_reply(&state, now, form.member, toast).await
 }

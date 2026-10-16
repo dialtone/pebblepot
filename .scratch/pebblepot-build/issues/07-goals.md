@@ -9,15 +9,28 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Spec: [Pebblepot v1](../../pebblepot-v1/spec.md)
 
-- [ ] ⭐ Save for this is offered only for rewards priced above the pot, and only when the person has no active goal. It writes a goal-set entry of −price and creates the goal.
-- [ ] The pot card shows the goal picture with a fill proportional to saved ÷ price, plus "N to go".
-- [ ] With an active goal, Spend shows "N to spend" = saved. A redeem with price ≤ saved succeeds; price > saved is refused.
-- [ ] When the pot is ≥ 0, the card shows Ready! with Got it. Got it marks the goal handed over and the card shows pebbles again.
-- [ ] Give up goal writes a refund entry of +price, marks the goal given up, and restores the pot.
-- [ ] Undoing the goal-set entry on the same day deletes the goal.
-- [ ] Mom and Dad can set goals the same way.
-- [ ] Covered by HTTP-seam tests (example from the spec: pot 8, goal 30 → −22, saved 8; Sticker 5 allowed, then Dessert 10 refused).
+- [x] ⭐ Save for this is offered only for rewards priced above the pot, and only when the person has no active goal. It writes a goal-set entry of −price and creates the goal.
+- [x] The pot card shows the goal picture with a fill proportional to saved ÷ price, plus "N to go".
+- [x] With an active goal, Spend shows "N to spend" = saved. A redeem with price ≤ saved succeeds; price > saved is refused.
+- [x] When the pot is ≥ 0, the card shows Ready! with Got it. Got it marks the goal handed over and the card shows pebbles again.
+- [x] Give up goal writes a refund entry of +price, marks the goal given up, and restores the pot.
+- [x] Undoing the goal-set entry on the same day deletes the goal.
+- [x] Mom and Dad can set goals the same way.
+- [x] Covered by HTTP-seam tests (example from the spec: pot 8, goal 30 → −22, saved 8; Sticker 5 allowed, then Dessert 10 refused).
+
+## Comments
+
+**2026-10-15, implemented** (PR build/ticket-07-goals):
+- **Migration.** New `migrations/0002_goal.sql` (0001 untouched) adds the `goal` table: member, `set_entry_id` (its own `goal_set` log entry), `refund_entry_id` (the `goal_refund` entry, once given up), `item_id`, the reward's name, picture and price copied, and `status` (`active`, `handed_over`, `given_up`). A partial unique index allows one active goal per member. "Ready" isn't stored: it is an active goal with pot ≥ 0.
+- **Rules.** Three new commands, each in one immediate transaction: `rules::set_goal(store, now, tz, member, item)` writes a `goal_set` entry of −price and creates the goal, and is refused with `goal_already_active` or `affordable` (price ≤ pot). `rules::give_up_goal(store, now, tz, member)` writes a `goal_refund` entry of +price and marks the goal given up (`no_goal` if there is none). `rules::hand_over_goal(store, member)` marks it handed over, writes nothing to the log, and is refused with `goal_not_ready` while the pot is below zero. The four new `Refusal` variants are appended at the end. The `rules::redeem` guard is now `price > pot + active goal price`, i.e. saved during a goal. `undo_entry` calls the new `undo_goal_effects`: undoing a `goal_set` entry deletes its goal, and its refund entry too if it was given up. Undoing a `goal_refund` entry makes the goal active again, unless another goal is active by then.
+- **Read model.** `Board.goals` maps member id to the active `Goal { name, picture, price }`, with `saved(pot)` and `is_ready(pot)`. `Member` and the other queries are unchanged.
+- **Web.** `POST /goal/set` (`GOAL_SET_PATH`, form `member`, `item`), `POST /goal/give-up` and `POST /goal/got-it` (`member`). They answer like `/redeem`: pots, the Spend sheet and a toast, all out of band. The goal-set and give-up toasts offer ↩︎ Undo; Got it doesn't. A pot card with a goal is a `<div data-shows="goal" data-goal data-goal-state="saving|ready" data-saved data-to-go data-fill>`, not a button, so it can hold a Got it button (`data-got-it`) next to the button that opens the today list. The goal picture is drawn twice, a grey copy and a colour copy clipped from the bottom to `--fill`, with "N to go" or "🎉 Ready!". A card without a goal is unchanged apart from `data-shows="pebbles"`. In Spend, `spendable` (the "N to spend" line) is saved during a goal, so locks and "N more to go" follow it. Locked tiles get "⭐ Save for this" (`data-save-for`) when there's no active goal. A goal banner (`data-spend-goal`) shows the goal with Give up goal (`data-give-up`), plus Got it when Ready. The live refresh needed no changes.
+- **Resolved ambiguities:** (1) Got it lives on the pot card, as the ticket says, and also on the Spend banner, next to Give up goal (from the grilling answer). (2) Without a fix, setting a goal, giving it up, then undoing the goal-set entry would leave +price of free pebbles, so undoing the set entry also removes its refund. (3) Undoing a refund puts the goal back, because the pot is back below zero by the price. If another goal was set in between, the old goal stays given up and the pot shows the odd balance, as Further Notes allow. (4) Setting a goal is judged against the pot (price > pot), as in the spec. A pot left below zero by an undo can still set a goal.
+- **Tests:** `tests/goals.rs`, 24 HTTP-seam tests. Its helpers live in that file, and `tests/common` is untouched. They cover the spec example (8 → −22, saved 8, Sticker allowed → −27, Pick dessert refused) and the boundaries for Save for this (price = pot gets no offer, and is refused as `affordable`). Also: one goal at a time, the fill and "N to go", "N to spend", spending saved down to exactly 0, Ready at pot 0 but not −1, Got it (refused before Ready, writes nothing, card back to pebbles), give up (refund +price, set entry kept, pot restored), undo of the set entry from the toast and the today list, the next-day undo refusal, undo after give-up, undo of a refund, Mom and Dad, the live refresh, unknown people and items, cross-site POSTs, and a restart. 101 tests in total (95 HTTP-seam + 6 unit), up from 77. Mutation checks: a redeem guard against the pot instead of saved fails 3 tests, `>=` instead of `>` fails 1, allowing a goal at price = pot fails 1, no affordability check fails 1, Got it before Ready fails 1, undo ignoring goals fails 4, and keeping the refund when undoing the set entry fails 1.
+- **Checked in a browser** (iPad landscape and portrait): a saving card, a Ready card with Got it, and the Spend sheet's goal banner with "N to spend". On narrow screens the goal card puts "N to go" (or Ready! with Got it) under the face and picture.
+- **For ticket 10 (edit rewards and family):** a goal keeps its own copy of the reward's name, picture and price in `goal`. `saved`, Ready and the refund all use that stored price, never `item.value`. Re-pricing or retiring a reward that is someone's active goal therefore already leaves the goal and pot alone, and its criterion should only need a test. Retiring a family member with an active goal leaves the goal row in place. They drop off the board, so nothing shows it. The pot card for a goal is a `<div>`, not a `<button>`, so any edit-mode tap on a pot must also handle `.goal-pot .pot-open`.
+- **For ticket 08 (Something else):** the four new `Refusal` variants and three routes and path constants are appended right after 06's, where 08 adds its own, so a merge meets adjacent added lines in `src/rules.rs` and `src/web.rs`. `templates/pots.html` and `templates/spend.html` changed; `row.html` and the section templates didn't.

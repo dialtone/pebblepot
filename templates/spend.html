@@ -1,5 +1,6 @@
 {#- The Spend sheet over the board: pick whose pebbles, then tap a reward to redeem it at once.
-    Rewards beyond what can be spent are locked with "🔒 N more to go". #}
+    Rewards beyond what can be spent are locked with "🔒 N more to go", and offer "⭐ Save for this"
+    unless that person is already saving for a goal, which then shows at the top. #}
 <div class="sheet-bg" id="spend{% if let Some(m) = spend.member %}-{{ m.id }}{% endif %}"
      data-spend-sheet="{% if let Some(m) = spend.member %}{{ m.id }}{% endif %}"{% if spend.oob %} hx-swap-oob="true"{% endif %}
      hx-on:click="if (event.target === this) this.remove()">
@@ -20,6 +21,18 @@
     {%- if let Some(m) = spend.member %}
     {#- Live refresh sends this along so an open sheet is redrawn after a change on any device. #}
     <input type="hidden" name="spend" value="{{ m.id }}" data-spend-member>
+    {%- if let Some(g) = m.goal %}
+    <div class="spend-goal{% if g.ready %} ready{% endif %}" data-spend-goal="{{ g.name }}" data-goal-state="{% if g.ready %}ready{% else %}saving{% endif %}">
+      <span class="goal-pic" style="--fill: {{ g.fill }}%"><span class="grey">{{ g.picture }}</span><span class="colour">{{ g.picture }}</span></span>
+      <span class="goal-text"><b>⭐ {{ g.name }}</b><span>{% if g.ready %}🎉 Ready!{% else %}{{ g.to_go }} to go{% endif %}</span></span>
+      {%- if g.ready %}
+      <button type="button" class="pill got-it" data-got-it="{{ m.id }}" hx-post="{{ crate::web::GOAL_GOT_IT_PATH }}"
+              hx-vals='{"member": {{ m.id }}}' hx-swap="none">Got it</button>
+      {%- endif %}
+      <button type="button" class="pill" data-give-up="{{ m.id }}" hx-post="{{ crate::web::GOAL_GIVE_UP_PATH }}"
+              hx-vals='{"member": {{ m.id }}}' hx-swap="none">Give up goal</button>
+    </div>
+    {%- endif %}
     <p class="spendable" data-spendable="{{ spend.spendable }}">{{ m.name }} has <b>{{ spend.spendable }}</b> to spend</p>
     <div class="tiles">
       {%- for r in spend.rewards %}
@@ -28,6 +41,10 @@
            data-state="locked" data-more-to-go="{{ short }}" aria-disabled="true">
         <span class="em">{{ r.picture }}</span><span class="lbl">{{ r.name }}</span><b class="price">{{ r.price }}</b>
         <span class="lockline">🔒 {{ short }} more to go</span>
+        {%- if r.can_save %}
+        <button type="button" class="pill save-for" data-save-for="{{ r.id }}" hx-post="{{ crate::web::GOAL_SET_PATH }}"
+                hx-vals='{"member": {{ m.id }}, "item": {{ r.id }}}' hx-swap="none">⭐ Save for this</button>
+        {%- endif %}
       </div>
       {%- else %}
       <button type="button" class="tile" data-reward="{{ r.id }}" data-reward-name="{{ r.name }}" data-price="{{ r.price }}"

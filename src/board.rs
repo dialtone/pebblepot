@@ -37,6 +37,28 @@ pub struct Board {
     /// (member id, good deed id) -> that person's count for the given day, for every good deed
     /// earned at least once that day.
     pub good_deed_counts: HashMap<(i64, i64), GoodDeedCount>,
+    /// Member id -> the goal they're saving for, for everyone with an active goal.
+    pub goals: HashMap<i64, Goal>,
+}
+
+/// An active goal: a reward already redeemed, being earned back. Copies the reward as it was set.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Goal {
+    pub name: String,
+    pub picture: String,
+    pub price: i64,
+}
+
+impl Goal {
+    /// What can be spent while saving: pot + goal price. Below zero only after a same-day undo.
+    pub fn saved(&self, pot: i64) -> i64 {
+        pot + self.price
+    }
+
+    /// Ready once the pot is back to zero or more. Not stored: it follows from the pot.
+    pub fn is_ready(&self, pot: i64) -> bool {
+        pot >= 0
+    }
 }
 
 /// One family member's tally for one good deed on one day.
@@ -119,6 +141,20 @@ pub async fn load(store: &Store, today: Date) -> Result<Board> {
                 })?
                 .collect::<rusqlite::Result<HashMap<_, _>>>()?;
 
+            let goals = conn
+                .prepare("SELECT member_id, name, picture, price FROM goal WHERE status = 'active'")?
+                .query_map([], |r| {
+                    Ok((
+                        r.get(0)?,
+                        Goal {
+                            name: r.get(1)?,
+                            picture: r.get(2)?,
+                            price: r.get(3)?,
+                        },
+                    ))
+                })?
+                .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+
             Ok(Board {
                 daily_chores: items(ItemKind::DailyChore)?,
                 good_deeds: items(ItemKind::GoodDeed)?,
@@ -126,6 +162,7 @@ pub async fn load(store: &Store, today: Date) -> Result<Board> {
                 members,
                 done,
                 good_deed_counts,
+                goals,
             })
         })
         .await

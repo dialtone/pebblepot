@@ -108,6 +108,32 @@ button.tile:active { transform: scale(.96); }
 .tile.locked { opacity: .55; filter: grayscale(.8); }
 .tile .lockline { font-size: 14px; font-weight: 700; color: var(--muted); }
 
+/* goals: the goal picture fills from grey (bottom up) to colour as "saved" grows */
+.goal-pic { position: relative; display: inline-block; flex: none; font-size: 44px; line-height: 1; }
+.goal-pic .grey { filter: grayscale(1); opacity: .35; }
+.goal-pic .colour { position: absolute; inset: 0; clip-path: inset(calc(100% - var(--fill)) 0 0 0); }
+.goal-pot { flex-grow: 1.5; padding: 0; gap: 0; }
+.goal-pot .pot-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 10px 14px; text-align: left; }
+.goal-pot .to-go { margin-left: auto; font-size: 20px; font-weight: 900; white-space: nowrap; }
+/* narrower screens: "N to go" (or Ready! and Got it) goes under the face and picture */
+@media (max-width: 900px) {
+  .goal-pot { flex-wrap: wrap; justify-content: center; }
+  .goal-pot .pot-open { flex: 1 1 100%; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 8px 10px; }
+  .goal-pot .to-go { margin: 0; width: 100%; text-align: center; font-size: 17px; }
+  .goal-pot .got-it { margin: 0 8px 8px; }
+  .goal-pic { font-size: 36px; }
+}
+.goal-pot.ready { flex-grow: 2; box-shadow: 0 2px 0 var(--line), inset 0 0 0 3px #f9c74f; }
+.got-it { margin-right: 10px; background: #f9c74f; box-shadow: none; }
+.spend-goal { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: var(--card); border-radius: 22px;
+  padding: 10px 14px; margin-bottom: 12px; box-shadow: 0 2px 0 var(--line); }
+.spend-goal .goal-pic { font-size: 54px; }
+.spend-goal .goal-text { flex: 1; min-width: 140px; display: flex; flex-direction: column; font-size: 18px; }
+.spend-goal .got-it { margin-right: 0; }
+.tile.locked:has(.save-for) { opacity: 1; filter: none; }
+.tile.locked:has(.save-for) > :not(.save-for) { opacity: .55; filter: grayscale(.8); }
+.save-for { padding: 8px 14px; min-height: 44px; font-size: 16px; background: #fff7d6; }
+
 /* phones: smaller faces so four still fit next to the label */
 @media (max-width: 600px) {
   .board { padding: 10px; }
