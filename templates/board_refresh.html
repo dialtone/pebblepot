@@ -9,3 +9,6 @@
   {%- endif %}
 </div>
 {%- endfor %}
+{%- if let Some(spend) = spend %}
+{% include "spend.html" %}
+{%- endif %}

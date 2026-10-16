@@ -34,6 +34,6 @@
 <div id="toast" class="toast" aria-live="polite"></div>
 {#- Live sync: one event stream; each `changed` refetches pots and rows (keeping the Other jobs search). #}
 <div id="live" hidden hx-ext="sse" sse-connect="{{ events_path }}" hx-get="{{ board_refresh_path }}"
-     hx-trigger="sse:changed, refresh" hx-include="[data-search]" hx-swap="none" hx-sync="this:replace"></div>
+     hx-trigger="sse:changed, refresh" hx-include="[data-search], [data-spend-member]" hx-swap="none" hx-sync="this:replace"></div>
 </body>
 </html>

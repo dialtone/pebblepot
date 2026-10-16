@@ -9,12 +9,20 @@
             hx-post="{{ crate::web::UNDO_PATH }}" hx-vals='{"entry": {{ entry }}, "item": {{ item.id }}}'
             hx-swap="none">✓</button>
     {%- else %}
+    {%- if f.badge.is_some() %}<span class="face-wrap">{% endif %}
     <button type="button" class="face" data-face-for="{{ f.member_id }}"
             style="--c: {{ f.colour }}" aria-label="{{ f.name }}"
             {%- if let Some(path) = item.earn_path %}
             hx-post="{{ path }}" hx-vals='{"member": {{ f.member_id }}, "item": {{ item.id }}}'
             hx-target="closest .row" hx-swap="outerHTML"
             {%- endif %}>{{ f.face }}</button>
+    {%- if let Some(badge) = f.badge %}
+    {#- A good deed's count today; tapping it takes the most recent one away. #}
+    <button type="button" class="badge" data-badge-for="{{ f.member_id }}" data-count="{{ badge.count }}"
+            data-undo-entry="{{ badge.latest_entry }}" aria-label="{{ f.name }}: {{ badge.count }} today, tap to take one away"
+            hx-post="{{ crate::web::UNDO_PATH }}" hx-vals='{"entry": {{ badge.latest_entry }}, "item": {{ item.id }}}'
+            hx-swap="none">{{ badge.count }}</button></span>
+    {%- endif %}
     {%- endif %}
     {%- endfor %}
   </span>

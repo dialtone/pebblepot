@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Spec: [Pebblepot v1](../../pebblepot-v1/spec.md)
 
@@ -17,7 +17,7 @@ Spec: [Pebblepot v1](../../pebblepot-v1/spec.md)
 
 ## Comments
 
-**2026-10-15, implemented** (not committed yet):
+**2026-10-15, implemented** (merged to main in PR #1, e88210d):
 - **Rules.** The new rules module's `earn_chore` runs in one immediate transaction. It checks that the family member and chore are active and that the chore hasn't been earned today. The log entry keeps its own copy of the name, picture and amount. The local day comes from the clock plus the household time zone.
 - **Earning.** `POST /earn/chore` (form: `member`, `item`) replies with the tapped row, plus the pots and a toast swapped in out of band, so a typed search isn't reset. A refusal answers 200 with a `data-refusal` toast. A non-chore item answers 404.
 - **Search.** `GET /occasional?q=` filters Other jobs on the server (case-insensitive name match) and keeps today's ✓s.

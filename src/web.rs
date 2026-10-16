@@ -58,8 +58,11 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(board_page))
         .route(OCCASIONAL_ROWS_PATH, get(occasional_rows))
         .route(EARN_CHORE_PATH, post(earn_chore))
+        .route(EARN_GOOD_DEED_PATH, post(earn_good_deed))
         .route(TODAY_PATH, get(today_list))
         .route(UNDO_PATH, post(undo))
+        .route(SPEND_PATH, get(spend_sheet))
+        .route(REDEEM_PATH, post(redeem))
         .route(EVENTS_PATH, get(events))
         .route(BOARD_REFRESH_PATH, get(board_refresh))
         .route(
@@ -191,7 +194,7 @@ impl Section {
     fn earn_path(self) -> Option<&'static str> {
         match self {
             Section::DailyChores | Section::OccasionalChores => Some(EARN_CHORE_PATH),
-            Section::GoodDeeds => None,
+            Section::GoodDeeds => Some(EARN_GOOD_DEED_PATH),
         }
     }
 
@@ -201,6 +204,8 @@ impl Section {
 }
 
 pub const EARN_CHORE_PATH: &str = "/earn/chore";
+/// POST `member=<id>&item=<id>`: a face tap on a 💛 Kind things row.
+pub const EARN_GOOD_DEED_PATH: &str = "/earn/good-deed";
 pub const OCCASIONAL_ROWS_PATH: &str = "/occasional";
 pub const EVENTS_PATH: &str = "/events";
 /// Everything a live refetch replaces: pots and section rows, swapped in out of band.
@@ -209,6 +214,10 @@ pub const BOARD_REFRESH_PATH: &str = "/board";
 pub const TODAY_PATH: &str = "/today";
 /// POST `entry=<id>` (and `item=<id>` from a ✓, to refresh its row even if refused).
 pub const UNDO_PATH: &str = "/undo";
+/// GET, optionally `?member=<id>`: the Spend sheet, asking whose pebbles, then that person's rewards.
+pub const SPEND_PATH: &str = "/spend";
+/// POST `member=<id>&item=<id>`: redeem a reward from that person's pot.
+pub const REDEEM_PATH: &str = "/redeem";
 
 struct MemberView {
     id: i64,
@@ -226,6 +235,8 @@ struct FaceView {
     colour: String,
     /// Chore already earned by this person today: shown as a ✓ that undoes this log entry.
     done_entry: Option<i64>,
+    /// Good deed earned by this person today: the count badge, which undoes the most recent.
+    badge: Option<board::GoodDeedCount>,
 }
 
 struct ItemView {
@@ -331,6 +342,11 @@ fn item_view(board: &Board, section: Section, item: &Item) -> ItemView {
                 colour: m.colour.clone(),
                 done_entry: if section.is_chores() {
                     board.done.get(&(m.id, item.id)).copied()
+                } else {
+                    None
+                },
+                badge: if section == Section::GoodDeeds {
+                    board.good_deed_counts.get(&(m.id, item.id)).copied()
                 } else {
                     None
                 },
@@ -595,12 +611,21 @@ async fn undo(
 struct BoardRefresh {
     members: Vec<MemberView>,
     sections: Vec<SectionView>,
+    /// The device's open Spend sheet, redrawn so its pot and locks stay current.
+    spend: Option<SpendView>,
     oob: bool,
+}
+
+/// Sheets open on the refreshing device (sent by `hx-include`).
+#[derive(Deserialize)]
+struct OpenSheets {
+    spend: Option<i64>,
 }
 
 async fn board_refresh(
     State(state): State<AppState>,
     Query(search): Query<SearchQuery>,
+    Query(open): Query<OpenSheets>,
 ) -> Result<Html<String>, AppError> {
     let board = board::load(&state.store, state.today()).await?;
     let sections = [
@@ -620,9 +645,158 @@ async fn board_refresh(
             .collect(),
     })
     .collect();
+    let spend = match open.spend {
+        Some(member) => spend_view(&board, &board::rewards(&state.store).await?, Some(member)),
+        None => None,
+    };
     render(BoardRefresh {
         members: member_views(&board),
         sections,
+        spend: spend.map(|spend| SpendView { oob: true, ..spend }),
         oob: true,
     })
+}
+
+struct RewardView {
+    id: i64,
+    name: String,
+    picture: String,
+    price: i64,
+    /// Pebbles still needed, if the reward costs more than can be spent.
+    more_to_go: Option<i64>,
+}
+
+/// The Spend sheet: "whose pebbles?", then that person's reward tiles.
+struct SpendView {
+    /// Everyone on the board, to pick whose pebbles to spend.
+    picker: Vec<MemberView>,
+    /// Whose pebbles are being spent; no tiles until someone is picked.
+    member: Option<MemberView>,
+    /// What can be spent without going below zero (the pot, for now).
+    spendable: i64,
+    rewards: Vec<RewardView>,
+    oob: bool,
+}
+
+/// The Spend sheet for `member` (or just the picker), or `None` if they aren't on the board.
+fn spend_view(board: &Board, rewards: &[Item], member: Option<i64>) -> Option<SpendView> {
+    let member = match member {
+        Some(id) => Some(board.members.iter().find(|m| m.id == id)?),
+        None => None,
+    };
+    let spendable = member.map_or(0, |m| m.pot);
+    Some(SpendView {
+        picker: member_views(board),
+        member: member.map(member_view),
+        spendable,
+        rewards: match member {
+            Some(_) => rewards
+                .iter()
+                .map(|r| RewardView {
+                    id: r.id,
+                    name: r.name.clone(),
+                    picture: r.picture.clone(),
+                    price: r.value,
+                    more_to_go: (r.value > spendable).then(|| r.value - spendable),
+                })
+                .collect(),
+            None => Vec::new(),
+        },
+        oob: false,
+    })
+}
+
+#[derive(Template)]
+#[template(path = "spend.html")]
+struct SpendPartial {
+    spend: SpendView,
+}
+
+#[derive(Deserialize)]
+struct SpendQuery {
+    member: Option<i64>,
+}
+
+async fn spend_sheet(
+    State(state): State<AppState>,
+    Query(query): Query<SpendQuery>,
+) -> Result<Response, AppError> {
+    let board = board::load(&state.store, state.today()).await?;
+    let rewards = board::rewards(&state.store).await?;
+    let Some(spend) = spend_view(&board, &rewards, query.member) else {
+        return Ok((StatusCode::NOT_FOUND, "That person isn't on the board").into_response());
+    };
+    Ok(render(SpendPartial { spend })?.into_response())
+}
+
+/// The reply to a reward tap: everything out of band (pots, the Spend sheet and a toast).
+#[derive(Template)]
+#[template(path = "redeem_response.html")]
+struct RedeemResponse {
+    members: Vec<MemberView>,
+    spend: Option<SpendView>,
+    toast: ToastView,
+    oob: bool,
+}
+
+async fn redeem(
+    State(state): State<AppState>,
+    Form(form): Form<EarnForm>,
+) -> Result<Html<String>, AppError> {
+    let now = state.clock.now();
+    let toast =
+        match rules::redeem(&state.store, now, &state.time_zone, form.member, form.item).await {
+            Ok(redeemed) => ToastView {
+                kind: "redeemed",
+                refusal: "",
+                text: format!("{} {} {}", redeemed.face, redeemed.picture, redeemed.amount),
+                undo_entry: Some(redeemed.entry_id),
+            },
+            Err(CommandError::Refused(refusal)) => ToastView::refused(refusal),
+            Err(CommandError::Store(e)) => return Err(AppError(e)),
+        };
+    let board = board::load(&state.store, local_day(now, &state.time_zone)).await?;
+    let rewards = board::rewards(&state.store).await?;
+    let spend = spend_view(&board, &rewards, Some(form.member));
+    render(RedeemResponse {
+        members: member_views(&board),
+        spend: spend.map(|spend| SpendView { oob: true, ..spend }),
+        toast,
+        oob: true,
+    })
+}
+
+async fn earn_good_deed(
+    State(state): State<AppState>,
+    Form(form): Form<EarnForm>,
+) -> Result<Response, AppError> {
+    let now = state.clock.now();
+    let result =
+        rules::earn_good_deed(&state.store, now, &state.time_zone, form.member, form.item).await;
+    let toast = match result {
+        Ok(earned) => ToastView {
+            kind: "earned",
+            refusal: "",
+            text: format!("{} {} +{}", earned.face, earned.picture, earned.amount),
+            undo_entry: Some(earned.entry_id),
+        },
+        Err(CommandError::Refused(refusal)) => ToastView::refused(refusal),
+        Err(CommandError::Store(e)) => return Err(AppError(e)),
+    };
+    let board = board::load(&state.store, local_day(now, &state.time_zone)).await?;
+    let Some(item) = board
+        .good_deeds
+        .iter()
+        .find(|item| item.id == form.item)
+        .map(|item| item_view(&board, Section::GoodDeeds, item))
+    else {
+        return Ok((StatusCode::NOT_FOUND, toast.text).into_response());
+    };
+    Ok(render(EarnResponse {
+        item,
+        members: member_views(&board),
+        toast,
+        oob: true,
+    })?
+    .into_response())
 }
