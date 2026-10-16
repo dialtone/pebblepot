@@ -10,8 +10,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub const DATABASE_FILE: &str = "pebblepot.sqlite3";
 
-static MIGRATIONS: LazyLock<Migrations<'static>> =
-    LazyLock::new(|| Migrations::new(vec![M::up(include_str!("../migrations/0001_initial.sql"))]));
+static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
+    Migrations::new(vec![
+        M::up(include_str!("../migrations/0001_initial.sql")),
+        M::up(include_str!("../migrations/0002_goal.sql")),
+    ])
+});
 
 #[derive(Clone)]
 pub struct Store {

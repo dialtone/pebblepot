@@ -1,11 +1,29 @@
 <header id="pots" class="pots" data-pots{% if oob %} hx-swap-oob="true"{% endif %}>
   {%- for m in members %}
-  <button type="button" class="pot" data-member="{{ m.id }}" data-member-name="{{ m.name }}" data-pot="{{ m.pot }}"
+  {%- if let Some(g) = m.goal %}
+  {#- Saving for a goal: the goal picture fills from grey to colour as "saved" grows. #}
+  <div class="pot goal-pot{% if g.ready %} ready{% endif %}" data-member="{{ m.id }}" data-member-name="{{ m.name }}" data-pot="{{ m.pot }}"
+       data-shows="goal" data-goal="{{ g.name }}" data-goal-state="{% if g.ready %}ready{% else %}saving{% endif %}"
+       data-saved="{{ g.saved }}" data-to-go="{{ g.to_go }}" data-fill="{{ g.fill }}">
+    <button type="button" class="pot-open" hx-get="{{ crate::web::TODAY_PATH }}?member={{ m.id }}" hx-target="#sheet"
+            aria-label="{{ m.name }}: saving for {{ g.name }}">
+      <span class="who"><span class="face" style="--c: {{ m.colour }}">{{ m.face }}</span><b>{{ m.name }}</b></span>
+      <span class="goal-pic" style="--fill: {{ g.fill }}%"><span class="grey">{{ g.picture }}</span><span class="colour">{{ g.picture }}</span></span>
+      <span class="to-go">{% if g.ready %}🎉 Ready!{% else %}{{ g.to_go }} to go{% endif %}</span>
+    </button>
+    {%- if g.ready %}
+    <button type="button" class="pill got-it" data-got-it="{{ m.id }}" hx-post="{{ crate::web::GOAL_GOT_IT_PATH }}"
+            hx-vals='{"member": {{ m.id }}}' hx-swap="none">Got it</button>
+    {%- endif %}
+  </div>
+  {%- else %}
+  <button type="button" class="pot" data-member="{{ m.id }}" data-member-name="{{ m.name }}" data-pot="{{ m.pot }}" data-shows="pebbles"
           hx-get="{{ crate::web::TODAY_PATH }}?member={{ m.id }}" hx-target="#sheet">
     <span class="who"><span class="face" style="--c: {{ m.colour }}">{{ m.face }}</span><b>{{ m.name }}</b></span>
     <span class="dots">{% for colour in m.pot_dots %}<span class="pebble" style="background: {{ colour }}"></span>{% endfor %}</span>
     <span class="num">{{ m.pot }}</span>
   </button>
+  {%- endif %}
   {%- endfor %}
   <button type="button" class="spend" data-spend hx-get="{{ crate::web::SPEND_PATH }}" hx-target="#sheet"><span class="em">🎁</span> Spend</button>
 </header>
