@@ -1,0 +1,10 @@
+# Keep the build context to what the Dockerfile copies.
+.git
+target
+data
+.scratch
+docs
+tests
+*.md
+Dockerfile
+.dockerignore
