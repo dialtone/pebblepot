@@ -1,4 +1,6 @@
 <header id="pots" class="pots" data-pots{% if oob %} hx-swap-oob="true"{% endif %}>
+  {#- Every pot also carries a ✏️ button, and the strip a ＋ Add someone, shown only in board edit mode
+      (`.board.editing`, by CSS) so pots swapped in by any reply work on any device. #}
   {%- for m in members %}
   {%- if let Some(g) = m.goal %}
   {#- Saving for a goal: the goal picture fills from grey to colour as "saved" grows. #}
@@ -15,16 +17,21 @@
     <button type="button" class="pill got-it" data-got-it="{{ m.id }}" hx-post="{{ crate::web::GOAL_GOT_IT_PATH }}"
             hx-vals='{"member": {{ m.id }}}' hx-swap="none">Got it</button>
     {%- endif %}
+    {% include "pot_edit.html" %}
   </div>
   {%- else %}
-  <button type="button" class="pot" data-member="{{ m.id }}" data-member-name="{{ m.name }}" data-pot="{{ m.pot }}" data-shows="pebbles"
-          hx-get="{{ crate::web::TODAY_PATH }}?member={{ m.id }}" hx-target="#sheet">
-    <span class="who"><span class="face" style="--c: {{ m.colour }}">{{ m.face }}</span><b>{{ m.name }}</b></span>
-    <span class="dots">{% for colour in m.pot_dots %}<span class="pebble" style="background: {{ colour }}"></span>{% endfor %}</span>
-    <span class="num">{{ m.pot }}</span>
-  </button>
+  <div class="pot" data-member="{{ m.id }}" data-member-name="{{ m.name }}" data-pot="{{ m.pot }}" data-shows="pebbles">
+    <button type="button" class="pot-open" hx-get="{{ crate::web::TODAY_PATH }}?member={{ m.id }}" hx-target="#sheet">
+      <span class="who"><span class="face" style="--c: {{ m.colour }}">{{ m.face }}</span><b>{{ m.name }}</b></span>
+      <span class="dots">{% for colour in m.pot_dots %}<span class="pebble" style="background: {{ colour }}"></span>{% endfor %}</span>
+      <span class="num">{{ m.pot }}</span>
+    </button>
+    {% include "pot_edit.html" %}
+  </div>
   {%- endif %}
   {%- endfor %}
+  <button type="button" class="pot-add" data-new-member hx-get="{{ crate::web::MEMBER_NEW_PATH }}" hx-target="#sheet"
+          aria-label="Add someone to the board">＋ Add someone</button>
   <button type="button" class="spend" data-spend hx-get="{{ crate::web::SPEND_PATH }}" hx-target="#sheet"><span class="em">🎁</span> Spend</button>
   {#- ✏️ Edit mode is the board at `/?edit=1`; hidden while editing, where ✓ Done leaves it. #}
   <a class="edit-toggle" href="/?edit=1" data-edit-toggle aria-label="Edit the board">✏️ Edit</a>

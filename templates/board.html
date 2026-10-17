@@ -8,9 +8,8 @@
 <script src="{{ htmx_path }}" defer></script>
 <script src="{{ sse_ext_path }}" defer></script>
 <script src="{{ live_js_path }}" defer></script>
-{%- if editing %}
+{#- Always loaded: the Spend sheet's edit mode can be opened from the normal board. #}
 <script src="{{ reorder_js_path }}" defer></script>
-{%- endif %}
 </head>
 <body>
 <main class="board{% if editing %} editing{% endif %}">
@@ -19,7 +18,7 @@
   {%- if editing %}
   {#- Sent along by the live refresh and the search, so this device keeps showing edit rows. #}
   <input type="hidden" name="edit" value="1" data-edit-mode>
-  <p class="edit-hint">✏️ Editing the board: ✏️ to change, drag ⠿ to move, 🗑 to retire.</p>
+  <p class="edit-hint">✏️ Editing the board: ✏️ to change, drag ⠿ to move, 🗑 to retire. Tap a pot to change that person.</p>
   {%- endif %}
 
   {%- for section in sections %}
@@ -48,9 +47,11 @@
 <a class="edit-done" href="/" data-edit-done>✓ Done editing</a>
 {%- endif %}
 <div id="sheet"></div>
+{#- A second sheet over the first: a reward's ✏️ sheet, above the Spend sheet in edit mode. #}
+<div id="sheet-over" class="sheet-over"></div>
 <div id="toast" class="toast" aria-live="polite"></div>
 {#- Live sync: one event stream; each `changed` refetches pots and rows (keeping the Other jobs search). #}
 <div id="live" hidden hx-ext="sse" sse-connect="{{ events_path }}" hx-get="{{ board_refresh_path }}"
-     hx-trigger="sse:changed, refresh" hx-include="[data-search], [data-spend-member], [data-edit-mode]" hx-swap="none" hx-sync="this:replace"></div>
+     hx-trigger="sse:changed, refresh" hx-include="[data-search], [data-spend-member], [data-spend-edit], [data-edit-mode]" hx-swap="none" hx-sync="this:replace"></div>
 </body>
 </html>

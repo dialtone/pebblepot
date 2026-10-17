@@ -22,7 +22,7 @@ use tower_http::csrf::CsrfLayer;
 
 use crate::board::{self, Board, Item, TodayList};
 use crate::clock::{Clock, local_day};
-use crate::model::ItemKind;
+use crate::model::{ItemKind, Role};
 use crate::rules::{self, CommandError, Refusal};
 use crate::store::Store;
 
@@ -78,6 +78,13 @@ pub fn router(state: AppState) -> Router {
         .route(ITEM_EDIT_PATH, get(item_edit_sheet).post(edit_item))
         .route(ITEM_RETIRE_PATH, post(retire_item))
         .route(ITEM_REORDER_PATH, post(reorder_items))
+        .route(REWARD_EDIT_PATH, get(reward_edit_sheet).post(edit_reward))
+        .route(REWARD_NEW_PATH, get(reward_new_sheet).post(new_reward))
+        .route(REWARD_RETIRE_PATH, post(retire_reward))
+        .route(REWARD_REORDER_PATH, post(reorder_rewards))
+        .route(MEMBER_EDIT_PATH, get(member_edit_sheet).post(edit_member))
+        .route(MEMBER_NEW_PATH, get(member_new_sheet).post(new_member))
+        .route(MEMBER_RETIRE_PATH, post(retire_member))
         .route(
             REORDER_JS_PATH,
             get(|| async { asset(REORDER_JS, "text/javascript", "no-cache") }),
@@ -272,6 +279,22 @@ pub const ITEM_EDIT_PATH: &str = "/item/edit";
 pub const ITEM_RETIRE_PATH: &str = "/item/retire";
 /// POST `section=<key>&order=<id>,<id>,…` (and the search `q`): a dragged row was dropped.
 pub const ITEM_REORDER_PATH: &str = "/item/reorder";
+/// GET `?item=<id>`: the ✏️ sheet for a reward, from the Spend sheet's edit mode (`/spend?edit=1`).
+/// POST `item`, `name`, `picture` and `price`: change it.
+pub const REWARD_EDIT_PATH: &str = "/reward/edit";
+/// GET: the ＋ New reward sheet. POST `name`, `picture` and `price` (default 1): add it.
+pub const REWARD_NEW_PATH: &str = "/reward/new";
+/// POST `item=<id>`: 🗑 retire a reward.
+pub const REWARD_RETIRE_PATH: &str = "/reward/retire";
+/// POST `order=<id>,<id>,…`: a dragged reward tile was dropped.
+pub const REWARD_REORDER_PATH: &str = "/reward/reorder";
+/// GET `?member=<id>`: the ✏️ sheet for a family member, from their pot in edit mode. POST `member`,
+/// `name`, `face` and `colour`: change them.
+pub const MEMBER_EDIT_PATH: &str = "/member/edit";
+/// GET: the ＋ Add someone sheet. POST `name`, `face`, `colour` and `role` (`kid` or `parent`).
+pub const MEMBER_NEW_PATH: &str = "/member/new";
+/// POST `member=<id>`: 🗑 retire a family member.
+pub const MEMBER_RETIRE_PATH: &str = "/member/retire";
 
 struct MemberView {
     id: i64,
@@ -752,6 +775,8 @@ struct BoardRefresh {
     sections: Vec<SectionView>,
     /// The device's open Spend sheet, redrawn so its pot and locks stay current.
     spend: Option<SpendView>,
+    /// The device's Spend sheet in ✏️ edit mode: its reward tiles, redrawn.
+    spend_tiles: Option<SpendView>,
     oob: bool,
 }
 
@@ -759,6 +784,8 @@ struct BoardRefresh {
 #[derive(Deserialize)]
 struct OpenSheets {
     spend: Option<i64>,
+    /// The Spend sheet is open in ✏️ edit mode.
+    spend_edit: Option<String>,
 }
 
 async fn board_refresh(
@@ -776,10 +803,18 @@ async fn board_refresh(
         Some(member) => spend_view(&board, &board::rewards(&state.store).await?, Some(member)),
         None => None,
     };
+    let spend_tiles = match open.spend_edit {
+        Some(_) => Some(SpendView {
+            tiles_oob: true,
+            ..spend_edit_view(&board, &board::rewards(&state.store).await?, None)
+        }),
+        None => None,
+    };
     render(BoardRefresh {
         members: member_views(&board),
         sections,
         spend: spend.map(|spend| SpendView { oob: true, ..spend }),
+        spend_tiles,
         oob: true,
     })
 }
@@ -795,16 +830,48 @@ struct RewardView {
     can_save: bool,
 }
 
-/// The Spend sheet: "whose pebbles?", then that person's reward tiles.
+/// The Spend sheet: "whose pebbles?", then that person's reward tiles. In its ✏️ edit mode, every
+/// reward tile instead has a drag handle, a pencil and 🗑, with ＋ New reward at the end.
 struct SpendView {
     /// Everyone on the board, to pick whose pebbles to spend.
     picker: Vec<MemberView>,
-    /// Whose pebbles are being spent; no tiles until someone is picked.
+    /// Whose pebbles are being spent; no tiles until someone is picked. In edit mode: whose Spend
+    /// sheet ✓ Done goes back to.
     member: Option<MemberView>,
     /// What can be spent: the pot, or what's saved (pot + goal price) during a goal.
     spendable: i64,
     rewards: Vec<RewardView>,
+    /// ✏️ Edit mode: rewards are changed, reordered, retired and added instead of redeemed.
+    editing: bool,
     oob: bool,
+    /// The edit-mode tiles alone are swapped in out of band (keeping the sheet's scroll).
+    tiles_oob: bool,
+}
+
+/// The Spend sheet in ✏️ edit mode. `member` is only where ✓ Done goes back to, so someone who
+/// isn't on the board any more just means going back to "whose pebbles?".
+fn spend_edit_view(board: &Board, rewards: &[Item], member: Option<i64>) -> SpendView {
+    SpendView {
+        picker: Vec::new(),
+        member: member
+            .and_then(|id| board.members.iter().find(|m| m.id == id))
+            .map(|m| board_member_view(board, m)),
+        spendable: 0,
+        rewards: rewards
+            .iter()
+            .map(|r| RewardView {
+                id: r.id,
+                name: r.name.clone(),
+                picture: r.picture.clone(),
+                price: r.value,
+                more_to_go: None,
+                can_save: false,
+            })
+            .collect(),
+        editing: true,
+        oob: false,
+        tiles_oob: false,
+    }
 }
 
 /// The Spend sheet for `member` (or just the picker), or `None` if they aren't on the board.
@@ -836,7 +903,9 @@ fn spend_view(board: &Board, rewards: &[Item], member: Option<i64>) -> Option<Sp
             None => Vec::new(),
         },
         member,
+        editing: false,
         oob: false,
+        tiles_oob: false,
     })
 }
 
@@ -854,9 +923,14 @@ struct SpendQuery {
 async fn spend_sheet(
     State(state): State<AppState>,
     Query(query): Query<SpendQuery>,
+    Query(mode): Query<EditMode>,
 ) -> Result<Response, AppError> {
     let board = board::load(&state.store, state.today()).await?;
     let rewards = board::rewards(&state.store).await?;
+    if mode.on() {
+        let spend = spend_edit_view(&board, &rewards, query.member);
+        return Ok(render(SpendPartial { spend })?.into_response());
+    }
     let Some(spend) = spend_view(&board, &rewards, query.member) else {
         return Ok((StatusCode::NOT_FOUND, "That person isn't on the board").into_response());
     };
@@ -1333,16 +1407,9 @@ async fn reorder_items(
     let Some(section) = Section::from_key(&form.section) else {
         return Ok((StatusCode::NOT_FOUND, "No such section").into_response());
     };
-    let order = form
-        .order
-        .split(',')
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(str::parse)
-        .collect::<Result<Vec<i64>, _>>();
-    let result = match order {
-        Ok(order) => rules::reorder_items(&state.store, section.kind(), order).await,
-        Err(_) => Err(CommandError::Refused(Refusal::UnknownItem)),
+    let result = match parse_order(&form.order) {
+        Some(order) => rules::reorder_items(&state.store, section.kind(), order).await,
+        None => Err(CommandError::Refused(Refusal::UnknownItem)),
     };
     let toast = match result {
         Ok(()) => None,
@@ -1350,4 +1417,420 @@ async fn reorder_items(
         Err(CommandError::Store(e)) => return Err(AppError(e)),
     };
     edit_reply(&state, &form.q, false, toast).await
+}
+
+// ✏️ The Spend sheet's edit mode: rewards are changed, added, reordered and retired there. None of
+// these touch the log or a goal, so pots, past entries and a goal's stored price never change.
+// A reward's ✏️ sheet opens in `#sheet-over`, above the Spend sheet, which stays open underneath.
+
+/// The ✏️ sheet for a reward, or ＋ New reward: picture, name and price.
+#[derive(Template)]
+#[template(path = "reward_edit.html")]
+struct RewardEditSheet {
+    /// `None` for ＋ New reward.
+    id: Option<i64>,
+    name: String,
+    picture: String,
+    price: i64,
+    min_price: i64,
+    max_price: i64,
+}
+
+impl RewardEditSheet {
+    fn new(id: Option<i64>, name: String, picture: String, price: i64) -> Self {
+        RewardEditSheet {
+            id,
+            name,
+            picture,
+            price,
+            min_price: *rules::REWARD_PRICES.start(),
+            max_price: *rules::REWARD_PRICES.end(),
+        }
+    }
+}
+
+async fn reward_edit_sheet(
+    State(state): State<AppState>,
+    Query(query): Query<ItemQuery>,
+) -> Result<Response, AppError> {
+    let rewards = board::rewards(&state.store).await?;
+    let Some(reward) = rewards.iter().find(|r| r.id == query.item) else {
+        return not_on_spend();
+    };
+    Ok(render(RewardEditSheet::new(
+        Some(reward.id),
+        reward.name.clone(),
+        reward.picture.clone(),
+        reward.value,
+    ))?
+    .into_response())
+}
+
+async fn reward_new_sheet() -> Result<Response, AppError> {
+    Ok(render(RewardEditSheet::new(
+        None,
+        String::new(),
+        rules::REWARD_PICTURE.to_string(),
+        rules::NEW_REWARD_PRICE,
+    ))?
+    .into_response())
+}
+
+/// The reply to a reward command: the Spend sheet's edit-mode tiles, out of band (so the sheet
+/// keeps its scroll), a toast and, after a ✏️ save, an empty `#sheet-over`. A refused save is only
+/// the toast, so the ✏️ sheet stays open to be fixed.
+#[derive(Template)]
+#[template(path = "reward_response.html")]
+struct RewardResponse {
+    tiles: Option<SpendView>,
+    close_sheet: bool,
+    toast: Option<ToastView>,
+}
+
+async fn reward_reply(
+    state: &AppState,
+    close_sheet: bool,
+    toast: Option<ToastView>,
+) -> Result<Response, AppError> {
+    let board = board::load(&state.store, state.today()).await?;
+    let rewards = board::rewards(&state.store).await?;
+    let tiles = SpendView {
+        tiles_oob: true,
+        ..spend_edit_view(&board, &rewards, None)
+    };
+    Ok(render(RewardResponse {
+        tiles: Some(tiles),
+        close_sheet,
+        toast,
+    })?
+    .into_response())
+}
+
+fn reward_refusal(refusal: Refusal) -> Result<Response, AppError> {
+    Ok(render(RewardResponse {
+        tiles: None,
+        close_sheet: false,
+        toast: Some(ToastView::refused(refusal)),
+    })?
+    .into_response())
+}
+
+async fn is_active_reward(state: &AppState, item: i64) -> Result<bool, AppError> {
+    Ok(board::rewards(&state.store)
+        .await?
+        .iter()
+        .any(|r| r.id == item))
+}
+
+fn not_on_spend() -> Result<Response, AppError> {
+    Ok((StatusCode::NOT_FOUND, Refusal::UnknownItem.message()).into_response())
+}
+
+/// The reward sheet's form. The price arrives as text so a blank or garbled one becomes a refusal.
+#[derive(Deserialize)]
+struct RewardForm {
+    /// The reward being changed; absent for ＋ New reward.
+    item: Option<i64>,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    picture: String,
+    #[serde(default)]
+    price: String,
+}
+
+impl RewardForm {
+    fn change(&self, price: i64) -> rules::ItemChange {
+        rules::ItemChange {
+            name: self.name.clone(),
+            picture: self.picture.clone(),
+            value: price,
+            kind: ItemKind::Reward,
+        }
+    }
+}
+
+fn changed_toast(kind: &'static str, text: String) -> ToastView {
+    ToastView {
+        kind,
+        refusal: "",
+        text,
+        undo_entry: None,
+    }
+}
+
+async fn edit_reward(
+    State(state): State<AppState>,
+    Form(form): Form<RewardForm>,
+) -> Result<Response, AppError> {
+    let Some(item) = form.item else {
+        return not_on_spend();
+    };
+    if !is_active_reward(&state, item).await? {
+        return not_on_spend();
+    }
+    let Ok(price) = form.price.trim().parse() else {
+        return reward_refusal(Refusal::BadPrice);
+    };
+    match rules::edit_item(&state.store, item, form.change(price)).await {
+        Ok(edited) => {
+            let toast = changed_toast("edited", format!("✏️ {} {}", edited.picture, edited.name));
+            reward_reply(&state, true, Some(toast)).await
+        }
+        Err(CommandError::Refused(refusal)) => reward_refusal(refusal),
+        Err(CommandError::Store(e)) => Err(AppError(e)),
+    }
+}
+
+async fn new_reward(
+    State(state): State<AppState>,
+    Form(form): Form<RewardForm>,
+) -> Result<Response, AppError> {
+    let price = match form.price.trim() {
+        "" => rules::NEW_REWARD_PRICE,
+        price => match price.parse() {
+            Ok(price) => price,
+            Err(_) => return reward_refusal(Refusal::BadPrice),
+        },
+    };
+    match rules::create_item(&state.store, form.change(price)).await {
+        Ok(added) => {
+            let toast = changed_toast("added", format!("＋ {} {}", added.picture, added.name));
+            reward_reply(&state, true, Some(toast)).await
+        }
+        Err(CommandError::Refused(refusal)) => reward_refusal(refusal),
+        Err(CommandError::Store(e)) => Err(AppError(e)),
+    }
+}
+
+async fn retire_reward(
+    State(state): State<AppState>,
+    Form(form): Form<ItemQuery>,
+) -> Result<Response, AppError> {
+    if !is_active_reward(&state, form.item).await? {
+        return not_on_spend();
+    }
+    match rules::retire_item(&state.store, form.item).await {
+        Ok(retired) => {
+            let toast = changed_toast(
+                "retired",
+                format!("🗑 {} {} retired", retired.picture, retired.name),
+            );
+            reward_reply(&state, false, Some(toast)).await
+        }
+        Err(CommandError::Refused(refusal)) => reward_refusal(refusal),
+        Err(CommandError::Store(e)) => Err(AppError(e)),
+    }
+}
+
+#[derive(Deserialize)]
+struct RewardReorderForm {
+    #[serde(default)]
+    order: String,
+}
+
+/// A dropped reward tile. The tiles are always redrawn, so a refused drop snaps back.
+async fn reorder_rewards(
+    State(state): State<AppState>,
+    Form(form): Form<RewardReorderForm>,
+) -> Result<Response, AppError> {
+    let result = match parse_order(&form.order) {
+        Some(order) => rules::reorder_items(&state.store, ItemKind::Reward, order).await,
+        None => Err(CommandError::Refused(Refusal::UnknownItem)),
+    };
+    let toast = match result {
+        Ok(()) => None,
+        Err(CommandError::Refused(refusal)) => Some(ToastView::refused(refusal)),
+        Err(CommandError::Store(e)) => return Err(AppError(e)),
+    };
+    reward_reply(&state, false, toast).await
+}
+
+/// A drop's `order=<id>,<id>,…`, or `None` if any of it isn't an id.
+fn parse_order(order: &str) -> Option<Vec<i64>> {
+    order
+        .split(',')
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(|id| id.parse().ok())
+        .collect()
+}
+
+// ✏️ Family members, from the pots in board edit mode: tap a pot to change or retire that person,
+// or ＋ Add someone. Log entries keep their own copies, so pots and the past never change.
+
+/// The ✏️ sheet for a family member, or ＋ Add someone: face, name, colour and, when adding, kid or
+/// parent.
+#[derive(Template)]
+#[template(path = "member_edit.html")]
+struct MemberEditSheet {
+    /// `None` for ＋ Add someone.
+    id: Option<i64>,
+    name: String,
+    face: String,
+    colour: String,
+    /// The colours to pick from: the palette, plus their current one if it isn't in it.
+    colours: Vec<String>,
+}
+
+fn colour_choices(current: &str) -> Vec<String> {
+    let palette = rules::MEMBER_COLOURS.iter().map(|c| c.to_string());
+    if rules::MEMBER_COLOURS.contains(&current) {
+        palette.collect()
+    } else {
+        std::iter::once(current.to_string())
+            .chain(palette)
+            .collect()
+    }
+}
+
+async fn member_edit_sheet(
+    State(state): State<AppState>,
+    Query(query): Query<TodayQuery>,
+) -> Result<Response, AppError> {
+    let board = board::load(&state.store, state.today()).await?;
+    let Some(member) = board.members.iter().find(|m| m.id == query.member) else {
+        return not_on_board();
+    };
+    Ok(render(MemberEditSheet {
+        id: Some(member.id),
+        name: member.name.clone(),
+        face: member.face.clone(),
+        colour: member.colour.clone(),
+        colours: colour_choices(&member.colour),
+    })?
+    .into_response())
+}
+
+async fn member_new_sheet(State(state): State<AppState>) -> Result<Response, AppError> {
+    let board = board::load(&state.store, state.today()).await?;
+    // The first colour nobody on the board has yet, so a new pot stands out.
+    let colour = rules::MEMBER_COLOURS
+        .iter()
+        .find(|c| !board.members.iter().any(|m| m.colour == **c))
+        .unwrap_or(&rules::MEMBER_COLOURS[0]);
+    Ok(render(MemberEditSheet {
+        id: None,
+        name: String::new(),
+        face: rules::MEMBER_FACE.to_string(),
+        colour: colour.to_string(),
+        colours: colour_choices(colour),
+    })?
+    .into_response())
+}
+
+fn not_on_board() -> Result<Response, AppError> {
+    Ok((StatusCode::NOT_FOUND, Refusal::UnknownMember.message()).into_response())
+}
+
+/// The reply to a family member command: on success the pots (out of band), an empty `#sheet` and a
+/// toast. Other devices redraw their rows' faces on the live refresh; the editing device shows no
+/// faces. A refusal is only the toast, so the sheet stays open to be fixed.
+#[derive(Template)]
+#[template(path = "member_response.html")]
+struct MemberResponse {
+    members: Vec<MemberView>,
+    changed: bool,
+    toast: ToastView,
+    oob: bool,
+}
+
+async fn member_reply(
+    state: &AppState,
+    result: Result<rules::EditedMember, CommandError>,
+    kind: &'static str,
+    text: impl FnOnce(&rules::EditedMember) -> String,
+) -> Result<Response, AppError> {
+    let (changed, toast) = match result {
+        Ok(edited) => (true, changed_toast(kind, text(&edited))),
+        Err(CommandError::Refused(refusal)) => (false, ToastView::refused(refusal)),
+        Err(CommandError::Store(e)) => return Err(AppError(e)),
+    };
+    let members = if changed {
+        member_views(&board::load(&state.store, state.today()).await?)
+    } else {
+        Vec::new()
+    };
+    Ok(render(MemberResponse {
+        members,
+        changed,
+        toast,
+        oob: true,
+    })?
+    .into_response())
+}
+
+async fn is_on_board(state: &AppState, member: i64) -> Result<bool, AppError> {
+    let board = board::load(&state.store, state.today()).await?;
+    Ok(board.members.iter().any(|m| m.id == member))
+}
+
+/// The family member sheet's form.
+#[derive(Deserialize)]
+struct MemberEditForm {
+    /// The family member being changed; absent for ＋ Add someone.
+    member: Option<i64>,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    face: String,
+    #[serde(default)]
+    colour: String,
+    /// Only ＋ Add someone sends this: `kid` (the default) or `parent`.
+    role: Option<String>,
+}
+
+impl MemberEditForm {
+    fn change(&self) -> rules::MemberChange {
+        rules::MemberChange {
+            name: self.name.clone(),
+            face: self.face.clone(),
+            colour: self.colour.clone(),
+        }
+    }
+}
+
+async fn edit_member(
+    State(state): State<AppState>,
+    Form(form): Form<MemberEditForm>,
+) -> Result<Response, AppError> {
+    let Some(member) = form.member else {
+        return not_on_board();
+    };
+    if !is_on_board(&state, member).await? {
+        return not_on_board();
+    }
+    let result = rules::edit_member(&state.store, member, form.change()).await;
+    member_reply(&state, result, "edited", |m| {
+        format!("✏️ {} {}", m.face, m.name)
+    })
+    .await
+}
+
+async fn new_member(
+    State(state): State<AppState>,
+    Form(form): Form<MemberEditForm>,
+) -> Result<Response, AppError> {
+    let Some(role) = Role::from_key(form.role.as_deref().unwrap_or(Role::Kid.as_str())) else {
+        return Ok((StatusCode::NOT_FOUND, "No such role").into_response());
+    };
+    let result = rules::create_member(&state.store, role, form.change()).await;
+    member_reply(&state, result, "added", |m| {
+        format!("＋ {} {}", m.face, m.name)
+    })
+    .await
+}
+
+async fn retire_member(
+    State(state): State<AppState>,
+    Form(form): Form<MemberForm>,
+) -> Result<Response, AppError> {
+    if !is_on_board(&state, form.member).await? {
+        return not_on_board();
+    }
+    let result = rules::retire_member(&state.store, form.member).await;
+    member_reply(&state, result, "retired", |m| {
+        format!("🗑 {} {} retired", m.face, m.name)
+    })
+    .await
 }

@@ -1,0 +1,23 @@
+{#- The Spend sheet's ✏️ edit-mode tiles: a drag handle, the pencil and 🗑 on every reward, then
+    ＋ New reward. Swapped in alone (out of band) after any reward command and on a live refresh.
+    The pencil and ＋ open their sheet in `#sheet-over`, so the Spend sheet stays open underneath. #}
+<div class="tiles reward-tiles" id="reward-tiles" data-reward-tiles{% if spend.tiles_oob %} hx-swap-oob="true"{% endif %}>
+  {%- for r in spend.rewards %}
+  <div class="tile editing" data-item="{{ r.id }}" data-reward="{{ r.id }}" data-reward-name="{{ r.name }}" data-price="{{ r.price }}"
+       data-state="editing" data-edit-tile>
+    <button type="button" class="handle" data-drag-handle data-reorder-section="rewards"
+            data-reorder-path="{{ crate::web::REWARD_REORDER_PATH }}" aria-label="Drag {{ r.name }} to move it">⠿</button>
+    <span class="em">{{ r.picture }}</span><span class="lbl">{{ r.name }}</span><b class="price">{{ r.price }}</b>
+    <span class="edit-tools">
+      <button type="button" class="tool" data-edit-reward="{{ r.id }}" aria-label="Change {{ r.name }}"
+              hx-get="{{ crate::web::REWARD_EDIT_PATH }}?item={{ r.id }}" hx-target="#sheet-over">✏️</button>
+      <button type="button" class="tool retire" data-retire-reward="{{ r.id }}" aria-label="Retire {{ r.name }}"
+              hx-post="{{ crate::web::REWARD_RETIRE_PATH }}" hx-vals='{"item": {{ r.id }}}' hx-swap="none"
+              hx-confirm="Retire {{ r.name }}? It leaves Spend for good. Pebbles already spent stay spent, and anyone saving for it keeps their goal.">🗑</button>
+    </span>
+  </div>
+  {%- endfor %}
+  <button type="button" class="tile new-tile" data-new-reward hx-get="{{ crate::web::REWARD_NEW_PATH }}" hx-target="#sheet-over">
+    <span class="em">＋</span><span class="lbl">New reward</span>
+  </button>
+</div>

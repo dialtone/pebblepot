@@ -1,0 +1,44 @@
+{#- ✏️ A family member's sheet, from their pot in board edit mode: change their face, name and colour,
+    or 🗑 retire them. With no id it's ＋ Add someone, a new kid or parent. Log entries keep their
+    own copies, so pots and the past never change. #}
+<div class="sheet-bg" id="edit-member" data-member-sheet="{% if let Some(id) = id %}{{ id }}{% endif %}"
+     hx-on:click="if (event.target === this) this.remove()">
+  <div class="sheet" role="dialog" aria-label="{% if id.is_some() %}Change {{ name }}{% else %}Add someone{% endif %}">
+    <div class="sheet-head">
+      <h2>{% if id.is_some() %}✏️ Change {{ name }}{% else %}＋ Add someone{% endif %}</h2>
+      <button type="button" class="x" aria-label="Close" data-close hx-on:click="this.closest('.sheet-bg').remove()">✕</button>
+    </div>
+    <form class="something-else" hx-post="{% if id.is_some() %}{{ crate::web::MEMBER_EDIT_PATH }}{% else %}{{ crate::web::MEMBER_NEW_PATH }}{% endif %}"
+          hx-swap="none" hx-disabled-elt="find button[type=submit]">
+      {%- if let Some(id) = id %}
+      <input type="hidden" name="member" value="{{ id }}">
+      {%- endif %}
+      <div class="what">
+        <input type="text" name="face" class="picture-input" value="{{ face }}" maxlength="16"
+               aria-label="Face" autocomplete="off">
+        <input type="text" name="name" class="search" value="{{ name }}" required maxlength="30" autocomplete="off"
+               placeholder="Name" aria-label="Name">
+      </div>
+      <div class="colours" role="radiogroup" aria-label="Colour">
+        {%- for c in colours %}
+        <label class="colour-choice"><input type="radio" name="colour" value="{{ c }}" data-colour-choice{% if c.as_str() == colour.as_str() %} checked{% endif %}>
+          <span class="swatch" style="--c: {{ c }}"></span></label>
+        {%- endfor %}
+      </div>
+      {%- if id.is_none() %}
+      <div class="how-often" role="radiogroup" aria-label="Kid or grown-up?">
+        <label class="often-choice"><input type="radio" name="role" value="kid" data-role-choice checked>
+          <b>🧒 Kid</b></label>
+        <label class="often-choice"><input type="radio" name="role" value="parent" data-role-choice>
+          <b>🧑 Parent</b></label>
+      </div>
+      {%- endif %}
+      <button type="submit" class="give">{% if id.is_some() %}Save{% else %}Add to the board{% endif %}</button>
+    </form>
+    {%- if let Some(id) = id %}
+    <button type="button" class="pill retire-member" data-retire-member="{{ id }}"
+            hx-post="{{ crate::web::MEMBER_RETIRE_PATH }}" hx-vals='{"member": {{ id }}}' hx-swap="none"
+            hx-confirm="Retire {{ name }}? Their pot and faces leave the board for good. Everything they earned and spent stays in the log.">🗑 Retire {{ name }}</button>
+    {%- endif %}
+  </div>
+</div>
