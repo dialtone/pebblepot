@@ -12,3 +12,6 @@
 {%- if let Some(spend) = spend %}
 {% include "spend.html" %}
 {%- endif %}
+{%- if let Some(spend) = spend_tiles %}
+{% include "reward_tiles.html" %}
+{%- endif %}

@@ -1,0 +1,31 @@
+{#- ✏️ A reward's sheet, opened from the Spend sheet's edit mode into `#sheet-over`, above it: change
+    its picture, name and price, or (with no id) ＋ add a new reward, starting at 1. Past log entries
+    and goals keep their own copies of the price. #}
+<div class="sheet-bg" id="edit-reward" data-reward-sheet="{% if let Some(id) = id %}{{ id }}{% endif %}"
+     hx-on:click="if (event.target === this) this.remove()">
+  <div class="sheet" role="dialog" aria-label="{% if id.is_some() %}Change {{ name }}{% else %}New reward{% endif %}">
+    <div class="sheet-head">
+      <h2>{% if id.is_some() %}✏️ Change <span class="muted">· reward</span>{% else %}＋ New reward{% endif %}</h2>
+      <button type="button" class="x" aria-label="Close" data-close hx-on:click="this.closest('.sheet-bg').remove()">✕</button>
+    </div>
+    <form class="something-else" hx-post="{% if id.is_some() %}{{ crate::web::REWARD_EDIT_PATH }}{% else %}{{ crate::web::REWARD_NEW_PATH }}{% endif %}"
+          hx-swap="none" hx-disabled-elt="find button[type=submit]">
+      {%- if let Some(id) = id %}
+      <input type="hidden" name="item" value="{{ id }}">
+      {%- endif %}
+      <div class="what">
+        <input type="text" name="picture" class="picture-input" value="{{ picture }}" maxlength="16"
+               aria-label="Picture" autocomplete="off">
+        <input type="text" name="name" class="search" value="{{ name }}" required maxlength="80" autocomplete="off"
+               placeholder="What can be picked? (a grown-up types)" aria-label="Name">
+      </div>
+      <div class="stepper">
+        <button type="button" class="x" aria-label="One fewer" hx-on:click="this.form.elements.price.stepDown()">−</button>
+        <label><input type="number" name="price" value="{{ price }}" min="{{ min_price }}" max="{{ max_price }}"
+               inputmode="numeric" aria-label="Price"> pebbles</label>
+        <button type="button" class="x" aria-label="One more" hx-on:click="this.form.elements.price.stepUp()">+</button>
+      </div>
+      <button type="submit" class="give">{% if id.is_some() %}Save{% else %}Add reward{% endif %}</button>
+    </form>
+  </div>
+</div>

@@ -1,0 +1,2 @@
+<button type="button" class="pot-edit" data-edit-member="{{ m.id }}" hx-get="{{ crate::web::MEMBER_EDIT_PATH }}?member={{ m.id }}"
+        hx-target="#sheet" aria-label="Change {{ m.name }}"><span>✏️</span></button>

@@ -1,12 +1,33 @@
 {#- The Spend sheet over the board: pick whose pebbles, then tap a reward to redeem it at once.
     Rewards beyond what can be spent are locked with "🔒 N more to go", and offer "⭐ Save for this"
-    unless that person is already saving for a goal, which then shows at the top. #}
+    unless that person is already saving for a goal, which then shows at the top.
+    Its own ✏️ Edit toggle switches it to edit mode (`?edit=1`), where the reward tiles are changed,
+    reordered, retired and added instead of redeemed. #}
+{%- if spend.editing %}
+<div class="sheet-bg" id="spend-edit" data-spend-sheet="" data-spend-editing
+     hx-on:click="if (event.target === this) this.remove()">
+  <div class="sheet spend-sheet" role="dialog" aria-label="Edit rewards">
+    <div class="sheet-head">
+      <h2>✏️ Rewards</h2>
+      <button type="button" class="pill done-pill" data-spend-edit-done
+              hx-get="{{ crate::web::SPEND_PATH }}{% if let Some(m) = spend.member %}?member={{ m.id }}{% endif %}" hx-target="#sheet">✓ Done</button>
+      <button type="button" class="x" aria-label="Close" data-close hx-on:click="this.closest('.sheet-bg').remove()">✕</button>
+    </div>
+    {#- Live refresh sends this along so the tiles are redrawn after a change on any device. #}
+    <input type="hidden" name="spend_edit" value="1" data-spend-edit>
+    <p class="edit-hint">✏️ to change, drag ⠿ to move, 🗑 to retire.</p>
+    {% include "reward_tiles.html" %}
+  </div>
+</div>
+{%- else %}
 <div class="sheet-bg" id="spend{% if let Some(m) = spend.member %}-{{ m.id }}{% endif %}"
      data-spend-sheet="{% if let Some(m) = spend.member %}{{ m.id }}{% endif %}"{% if spend.oob %} hx-swap-oob="true"{% endif %}
      hx-on:click="if (event.target === this) this.remove()">
   <div class="sheet spend-sheet" role="dialog" aria-label="Spend pebbles">
     <div class="sheet-head">
       <h2>🎁 Spend pebbles</h2>
+      <button type="button" class="pill" data-spend-edit-toggle aria-label="Edit the rewards"
+              hx-get="{{ crate::web::SPEND_PATH }}?edit=1{% if let Some(m) = spend.member %}&member={{ m.id }}{% endif %}" hx-target="#sheet">✏️ Edit</button>
       <button type="button" class="x" aria-label="Close" data-close hx-on:click="this.closest('.sheet-bg').remove()">✕</button>
     </div>
     <div class="spend-who">
@@ -58,3 +79,4 @@
     {%- endif %}
   </div>
 </div>
+{%- endif %}

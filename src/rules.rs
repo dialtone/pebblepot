@@ -5,7 +5,7 @@ use jiff::{SignedDuration, Timestamp};
 use rusqlite::{OptionalExtension, TransactionBehavior};
 
 use crate::clock::local_day;
-use crate::model::ItemKind;
+use crate::model::{ItemKind, Role};
 use crate::store::{self, Store};
 
 /// Why a command was refused. Shown to the family as a short message.
@@ -34,6 +34,10 @@ pub enum Refusal {
     NameNeeded,
     /// Something else's pebble value is outside `SOMETHING_ELSE_VALUES`.
     BadValue,
+    /// A reward's price is outside `REWARD_PRICES`.
+    BadPrice,
+    /// A family member's colour isn't one of the `#rrggbb` colours the sheet offers.
+    BadColour,
 }
 
 impl Refusal {
@@ -53,6 +57,8 @@ impl Refusal {
             Refusal::GoalNotReady => "goal_not_ready",
             Refusal::NameNeeded => "name_needed",
             Refusal::BadValue => "bad_value",
+            Refusal::BadPrice => "bad_price",
+            Refusal::BadColour => "bad_colour",
         }
     }
 
@@ -71,6 +77,8 @@ impl Refusal {
             Refusal::GoalNotReady => "Not there yet ⭐",
             Refusal::NameNeeded => "Give it a name first ✏️",
             Refusal::BadValue => "Pick 1 to 100 pebbles",
+            Refusal::BadPrice => "Pick a price from 1 to 1000 pebbles",
+            Refusal::BadColour => "Pick a colour 🎨",
         }
     }
 }
@@ -775,7 +783,8 @@ pub struct ItemChange {
     pub name: String,
     /// Blank becomes ✨, as for Something else.
     pub picture: String,
-    /// Pebbles earned (or a reward's price), within `SOMETHING_ELSE_VALUES`.
+    /// Pebbles earned, within `SOMETHING_ELSE_VALUES`, or a reward's price, within
+    /// `REWARD_PRICES`.
     pub value: i64,
     /// The item's kind afterwards. Only a chore can change kind: daily ⇄ occasional.
     pub kind: ItemKind,
@@ -790,6 +799,65 @@ pub struct EditedItem {
     /// Its kind before the change (a daily ⇄ occasional switch moves it between sections).
     pub was: ItemKind,
     pub kind: ItemKind,
+}
+
+/// A reward's price: a new one starts at `NEW_REWARD_PRICE`. Wider than `SOMETHING_ELSE_VALUES`,
+/// since big rewards are saved up for (the starting Big toy is 100), but capped so a typo can't
+/// put a reward out of reach for good.
+pub const REWARD_PRICES: std::ops::RangeInclusive<i64> = 1..=1000;
+pub const NEW_REWARD_PRICE: i64 = 1;
+/// The picture a reward gets when none is given.
+pub const REWARD_PICTURE: &str = "🎁";
+
+/// A change's trimmed name and its picture (a blank one becomes the kind's default), or why it's
+/// refused: no name, or a value outside the kind's range.
+fn checked(change: &ItemChange) -> Result<(String, String), Refusal> {
+    let name = change.name.trim().to_string();
+    if name.is_empty() {
+        return Err(Refusal::NameNeeded);
+    }
+    let (values, refusal, default_picture) = if change.kind == ItemKind::Reward {
+        (REWARD_PRICES, Refusal::BadPrice, REWARD_PICTURE)
+    } else {
+        (
+            SOMETHING_ELSE_VALUES,
+            Refusal::BadValue,
+            SOMETHING_ELSE_PICTURE,
+        )
+    };
+    if !values.contains(&change.value) {
+        return Err(refusal);
+    }
+    let picture = match change.picture.trim() {
+        "" => default_picture.to_string(),
+        picture => picture.to_string(),
+    };
+    Ok((name, picture))
+}
+
+/// ＋ Add a new item of `change.kind` (a reward, from the Spend sheet) at the end of its list.
+pub async fn create_item(store: &Store, change: ItemChange) -> Result<EditedItem, CommandError> {
+    let (name, picture) = checked(&change).map_err(CommandError::Refused)?;
+    let (value, kind) = (change.value, change.kind);
+    Ok(store
+        .call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            tx.execute(
+                "INSERT INTO item (kind, name, picture, value, position)
+                 SELECT ?1, ?2, ?3, ?4, COALESCE(MAX(position), 0) + 1 FROM item WHERE kind = ?1",
+                (kind.as_str(), &name, &picture, value),
+            )?;
+            let item_id = tx.last_insert_rowid();
+            tx.commit()?;
+            Ok(EditedItem {
+                item_id,
+                name,
+                picture,
+                was: kind,
+                kind,
+            })
+        })
+        .await?)
 }
 
 fn is_chore(kind: ItemKind) -> bool {
@@ -830,17 +898,7 @@ pub async fn edit_item(
     item_id: i64,
     change: ItemChange,
 ) -> Result<EditedItem, CommandError> {
-    let name = change.name.trim().to_string();
-    if name.is_empty() {
-        return Err(CommandError::Refused(Refusal::NameNeeded));
-    }
-    if !SOMETHING_ELSE_VALUES.contains(&change.value) {
-        return Err(CommandError::Refused(Refusal::BadValue));
-    }
-    let picture = match change.picture.trim() {
-        "" => SOMETHING_ELSE_PICTURE.to_string(),
-        picture => picture.to_string(),
-    };
+    let (name, picture) = checked(&change).map_err(CommandError::Refused)?;
     let (value, kind) = (change.value, change.kind);
     let outcome = store
         .call(move |conn| {
@@ -943,6 +1001,141 @@ pub async fn reorder_items(
             }
             tx.commit()?;
             Ok(Ok(()))
+        })
+        .await?;
+    outcome.map_err(CommandError::Refused)
+}
+
+// ✏️ Family members: added, changed and retired from the pots in edit mode. A retired family
+// member leaves the board, Spend and every row, and their log entries (and any goal) stay put.
+
+/// The face a family member gets when none is given.
+pub const MEMBER_FACE: &str = "🙂";
+/// The colours the family member sheet offers. Any `#rrggbb` colour is accepted.
+pub const MEMBER_COLOURS: [&str; 10] = [
+    "#f59e0b", "#3b82f6", "#db2777", "#16a34a", "#8b5cf6", "#ef4444", "#0ea5e9", "#14b8a6",
+    "#f97316", "#6b7280",
+];
+
+/// What a family member is added as, or changed to, with the ✏️ sheet.
+#[derive(Clone, Debug)]
+pub struct MemberChange {
+    pub name: String,
+    /// Blank becomes `MEMBER_FACE`.
+    pub face: String,
+    /// `#rrggbb`.
+    pub colour: String,
+}
+
+/// A family member as they were just added, changed or retired.
+#[derive(Clone, Debug)]
+pub struct EditedMember {
+    pub member_id: i64,
+    pub name: String,
+    pub face: String,
+}
+
+/// A change's trimmed name, its face (blank becomes `MEMBER_FACE`) and its lower-case colour, or
+/// why it's refused.
+fn checked_member(change: &MemberChange) -> Result<(String, String, String), Refusal> {
+    let name = change.name.trim().to_string();
+    if name.is_empty() {
+        return Err(Refusal::NameNeeded);
+    }
+    let colour = change.colour.trim().to_ascii_lowercase();
+    let hex = colour.strip_prefix('#').unwrap_or("");
+    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(Refusal::BadColour);
+    }
+    let face = match change.face.trim() {
+        "" => MEMBER_FACE.to_string(),
+        face => face.to_string(),
+    };
+    Ok((name, face, colour))
+}
+
+/// ＋ Add someone: a new kid or parent at the end of the pots, starting at 0 pebbles.
+pub async fn create_member(
+    store: &Store,
+    role: Role,
+    change: MemberChange,
+) -> Result<EditedMember, CommandError> {
+    let (name, face, colour) = checked_member(&change).map_err(CommandError::Refused)?;
+    Ok(store
+        .call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            tx.execute(
+                "INSERT INTO family_member (name, face, colour, role, position)
+                 SELECT ?1, ?2, ?3, ?4, COALESCE(MAX(position), 0) + 1 FROM family_member",
+                (&name, &face, &colour, role.as_str()),
+            )?;
+            let member_id = tx.last_insert_rowid();
+            tx.commit()?;
+            Ok(EditedMember {
+                member_id,
+                name,
+                face,
+            })
+        })
+        .await?)
+}
+
+/// ✏️ Rename, re-face or re-colour a family member. Their log entries keep their own copies of
+/// what each entry was for, and the pot is still what they add up to.
+pub async fn edit_member(
+    store: &Store,
+    member_id: i64,
+    change: MemberChange,
+) -> Result<EditedMember, CommandError> {
+    let (name, face, colour) = checked_member(&change).map_err(CommandError::Refused)?;
+    let outcome = store
+        .call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let changed = tx.execute(
+                "UPDATE family_member SET name = ?1, face = ?2, colour = ?3
+                 WHERE id = ?4 AND retired = 0",
+                (&name, &face, &colour, member_id),
+            )?;
+            if changed == 0 {
+                return Ok(Err(Refusal::UnknownMember));
+            }
+            tx.commit()?;
+            Ok(Ok(EditedMember {
+                member_id,
+                name,
+                face,
+            }))
+        })
+        .await?;
+    outcome.map_err(CommandError::Refused)
+}
+
+/// 🗑 Retire a family member: their pot card and faces leave the board for good. Nothing is
+/// deleted, so their log entries, and any goal they were saving for, stay as they were.
+pub async fn retire_member(store: &Store, member_id: i64) -> Result<EditedMember, CommandError> {
+    let outcome = store
+        .call(move |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let member: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT name, face FROM family_member WHERE id = ?1 AND retired = 0",
+                    [member_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let Some((name, face)) = member else {
+                return Ok(Err(Refusal::UnknownMember));
+            };
+            tx.execute(
+                "UPDATE family_member SET retired = 1 WHERE id = ?1",
+                [member_id],
+            )?;
+            tx.commit()?;
+            Ok(Ok(EditedMember {
+                member_id,
+                name,
+                face,
+            }))
         })
         .await?;
     outcome.map_err(CommandError::Refused)

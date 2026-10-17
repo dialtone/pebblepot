@@ -13,6 +13,12 @@ impl Role {
             Role::Parent => "parent",
         }
     }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        [Role::Kid, Role::Parent]
+            .into_iter()
+            .find(|role| role.as_str() == key)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

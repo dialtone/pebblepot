@@ -18,6 +18,6 @@
   function squash(html) { return html.replace(/>\s+</g, "><").trim(); }
   document.addEventListener("htmx:oobBeforeSwap", function (e) {
     var now = e.detail.target, next = e.detail.fragment.firstElementChild;
-    if (now.matches("#pots, .rows") && next && squash(next.outerHTML) === squash(now.outerHTML)) e.detail.shouldSwap = false;
+    if (now.matches("#pots, .rows, .reward-tiles") && next && squash(next.outerHTML) === squash(now.outerHTML)) e.detail.shouldSwap = false;
   });
 })();

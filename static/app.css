@@ -35,7 +35,8 @@ button.face:active { transform: scale(.94); }
 .pots { display: flex; flex-wrap: wrap; gap: 12px; position: sticky; top: 0; z-index: 5;
   background: var(--bg); padding: 8px 0 12px; }
 .pot, .spend { background: var(--card); border-radius: 22px; padding: 10px 14px; box-shadow: 0 2px 0 var(--line); }
-.pot { flex: 1 1 0; min-width: 130px; display: flex; align-items: center; gap: 10px; text-align: left; }
+.pot { flex: 1 1 0; min-width: 130px; display: flex; align-items: center; position: relative; padding: 0; }
+.pot-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 10px 14px; text-align: left; }
 .pot .who { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 15px; }
 .pot .face { width: 52px; height: 52px; font-size: 28px; }
 .pot .dots { flex: 1; min-width: 0; max-width: 120px; max-height: 44px; overflow: hidden; }
@@ -112,8 +113,7 @@ button.tile:active { transform: scale(.96); }
 .goal-pic { position: relative; display: inline-block; flex: none; font-size: 44px; line-height: 1; }
 .goal-pic .grey { filter: grayscale(1); opacity: .35; }
 .goal-pic .colour { position: absolute; inset: 0; clip-path: inset(calc(100% - var(--fill)) 0 0 0); }
-.goal-pot { flex-grow: 1.5; padding: 0; gap: 0; }
-.goal-pot .pot-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 10px 14px; text-align: left; }
+.goal-pot { flex-grow: 1.5; }
 .goal-pot .to-go { margin-left: auto; font-size: 20px; font-weight: 900; white-space: nowrap; }
 /* narrower screens: "N to go" (or Ready! and Got it) goes under the face and picture */
 @media (max-width: 900px) {
@@ -177,7 +177,6 @@ button.tile:active { transform: scale(.96); }
 .board.editing { padding-bottom: 100px; }
 .row.editing { gap: 10px; }
 .handle { flex: none; width: 44px; height: 56px; font-size: 30px; color: var(--muted); cursor: grab; touch-action: none; }
-.row.dragging { opacity: .8; box-shadow: 0 0 0 3px var(--ink), 0 10px 24px rgba(0, 0, 0, .18); }
 .edit-tools { display: flex; gap: 8px; flex: none; }
 .tool { width: 56px; height: 56px; border-radius: 50%; font-size: 26px; background: var(--bg); box-shadow: inset 0 0 0 2px var(--line); }
 .tool.retire { background: #fff1ee; }
@@ -193,3 +192,37 @@ button.tile:active { transform: scale(.96); }
   .row.editing .picture { font-size: 34px; width: 40px; }
   .tool { width: 48px; height: 48px; font-size: 22px; }
 }
+
+/* ✏️ Family members in board edit mode: every pot shows a ✏️ and opens that person's sheet, and
+   ＋ Add someone joins the strip. Both are in every pots swap, and shown only while editing. */
+.pot-edit, .pot-add { display: none; }
+/* the whole card is the tap target; the ✏️ badge sits on its corner, clear of the number */
+.board.editing .pot-edit { display: block; position: absolute; inset: 0; z-index: 1; border-radius: 22px;
+  box-shadow: inset 0 0 0 3px var(--ink); }
+.pot-edit span { position: absolute; top: -10px; right: -8px; width: 34px; height: 34px; border-radius: 50%;
+  background: var(--ink); font-size: 16px; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 3px var(--bg); }
+.board.editing .pots { padding-top: 14px; }
+.board.editing .pot-add { display: flex; flex: none; align-items: center; padding: 10px 18px; border-radius: 22px;
+  font-size: 20px; font-weight: 800; box-shadow: inset 0 0 0 3px var(--line); border: 0; }
+.colours { display: flex; flex-wrap: wrap; gap: 12px; }
+.colour-choice { cursor: pointer; }
+.colour-choice input { position: absolute; opacity: 0; pointer-events: none; }
+.swatch { display: block; width: 48px; height: 48px; border-radius: 50%; background: var(--c); }
+.colour-choice:has(input:checked) .swatch { box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--ink); }
+.retire-member { width: 100%; margin-top: 18px; background: #fff1ee; }
+
+/* ✏️ The Spend sheet's edit mode: a drag handle, pencil and 🗑 on every reward tile, then ＋ New reward */
+.sheet-head > h2 { flex: 1; }
+.done-pill { background: var(--ink); color: #fff; box-shadow: none; }
+.tile.editing { position: relative; padding-top: 40px; }
+.tile.editing .handle { position: absolute; top: 2px; left: 4px; height: 44px; }
+.tile.editing .em { font-size: 48px; }
+.tile.editing .edit-tools { margin-top: 4px; }
+.new-tile { background: transparent; box-shadow: inset 0 0 0 3px var(--line); color: var(--muted); }
+.new-tile .em { font-size: 48px; }
+.dragging { opacity: .8; box-shadow: 0 0 0 3px var(--ink), 0 10px 24px rgba(0, 0, 0, .18); }
+@media (max-width: 600px) {
+  .board.editing .pot-add { flex: 1 1 100%; justify-content: center; }
+}
+.sheet-over .sheet-bg { z-index: 25; }
