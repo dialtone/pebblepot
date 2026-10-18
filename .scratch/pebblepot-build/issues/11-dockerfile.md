@@ -8,14 +8,14 @@ The image listens on `0.0.0.0` inside the container and keeps its data in a moun
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Spec: [Pebblepot v1](../../pebblepot-v1/spec.md)
 
-- [ ] `docker build` succeeds on an Apple Silicon Mac. `docker run` with a port mapping and a data-folder volume serves a working board.
-- [ ] Data survives a container restart, because the SQLite file and its WAL live in the mounted volume.
-- [ ] The container stops promptly on `docker stop`.
-- [ ] No build stage needs anything beyond the two base images. Bundled SQLite compiles in the `rust` stage.
+- [x] `docker build` succeeds on an Apple Silicon Mac. `docker run` with a port mapping and a data-folder volume serves a working board.
+- [x] Data survives a container restart, because the SQLite file and its WAL live in the mounted volume.
+- [x] The container stops promptly on `docker stop`.
+- [x] No build stage needs anything beyond the two base images. Bundled SQLite compiles in the `rust` stage.
 
 ## Comments
 
@@ -34,3 +34,19 @@ Spec: [Pebblepot v1](../../pebblepot-v1/spec.md)
   - Set `PEBBLEPOT_TIME_ZONE` in the container's `environment`; the other three already have image defaults but the spec wants all four explicit.
   - `docker stop`'s 10 s grace is ample: shutdown took 0.05 s with a live stream open.
   - `docker build` uses only the classic Dockerfile syntax (no `RUN --mount`), so it works with or without BuildKit.
+
+**2026-10-17, verified in Docker** (PR build/ticket-11-verify-docker), Docker Desktop on Apple Silicon, from a cold image cache. No Dockerfile or code change was needed.
+- **Build (arm64):** `docker build -t pebblepot:test .` exits 0 in **98 s** wall time, including the base-image pulls (~38 s). The dependency layer took 48 s and the app layer 8.5 s. The image is **107 MB** (101 MB is `debian:trixie-slim`, 6.7 MB is the binary), runs as user `pebblepot`.
+- **Board and earn:** `docker run -d -p 127.0.0.1:8078:8070 -v <mktemp -d>:/data -e PEBBLEPOT_TIME_ZONE=America/Los_Angeles pebblepot:test`. `GET /` 200 (57 KB) and the static assets 200. A chore earn sent the way htmx in a browser on that host sends it (`Origin: http://localhost:8078`, `Sec-Fetch-Site: same-origin`, `HX-Request: true`) returns 200 and the row re-renders. The same POST with `Origin: http://evil.example`/`Sec-Fetch-Site: cross-site` returns 403.
+- **Time zone:** the startup line reads `time zone America/Los_Angeles`. The earn made at `2026-10-18T05:06Z` was stored with `local_day = 2026-10-17`, so "today" follows `PEBBLEPOT_TIME_ZONE`, not the container's UTC. Without the variable the log says `Etc/UTC`. A plain `TZ=America/Los_Angeles` also works, because jiff reads it and the slim image has `/usr/share/zoneinfo`, but `PEBBLEPOT_TIME_ZONE` is the documented setting.
+- **Persistence:** `pebblepot.sqlite3`, `-wal` and `-shm` appear in the mounted folder, and `journal_mode` is `wal`. The earn is still on the board and in the Today list after `docker restart`, and also after `docker rm` and a fresh `docker run` on the same folder.
+- **Stop:** with an `/events` stream open, `docker stop` takes **0.14 s** and the exit code is 0. The stream closes cleanly (curl exits 0). The app logs nothing on shutdown, and the only log line is the startup one.
+- **Base images only:** the Dockerfile has no `apt-get`, `curl` or `wget`. The `rust` stage downloads crates from crates.io during `cargo build`, which the deploy decision accepts, and the bundled SQLite compiles there with the image's own C compiler.
+- **Data-folder ownership:** on Docker Desktop for macOS, a host folder with mode 700 owned by the Mac user works as is, because file sharing doesn't enforce the container's UID. Docker Desktop can't prove the Linux case with a bind mount, so it was reproduced with a tmpfs: a root-owned 755 `/data` makes the container exit 1 with `pebblepot: unable to open database file: /data/pebblepot.sqlite3`, and the same folder owned by 10001:10001 with mode 750 works. A named volume also works, because Docker copies the image's 10001-owned `/data` into an empty volume. The README now gives the Linux `chown` command.
+- **amd64:** `docker build --platform linux/amd64` exits 0 in **127 s** (dependency layer 78 s, app layer 21 s) and the image is 86 MB. That image under emulation, with `Europe/Rome`, served the board (200), accepted the earn (200), refused the cross-site POST (403) and stopped in 0.14 s with exit code 0.
+- **`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`** are all clean.
+- **For ticket 12:**
+  - Create `/persist/opt/services/pebblepot` as **10001:10001**, for example with `systemd.tmpfiles` `d /persist/opt/services/pebblepot 0750 10001 10001 -`. Otherwise the container exits at once with `unable to open database file`.
+  - Set `PEBBLEPOT_TIME_ZONE` explicitly.
+  - Shutdown takes well under a second, so the default 10 s stop timeout is fine.
+  - The first `pebblepot-build` on dabass should take a few minutes: the base pulls (~600 MB) plus about 1–2 min of compiling on native x86-64. Later builds that change only `src/` reuse the dependency layer (seconds).

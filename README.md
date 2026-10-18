@@ -65,7 +65,7 @@ docker run -d --name pebblepot -p 8070:8070 \
   pebblepot
 ```
 
-The container runs as user `10001:10001`, so the mounted `data` folder must be writable by that user. Always set `PEBBLEPOT_TIME_ZONE`, because without it the container uses UTC.
+The container runs as user `10001:10001`, so the mounted `data` folder must be writable by that user. On Linux, create it with `mkdir -p data && sudo chown 10001:10001 data`; otherwise the container exits with `unable to open database file`. Docker Desktop on macOS maps ownership through its file sharing, so a plain `mkdir data` is enough there. Always set `PEBBLEPOT_TIME_ZONE`, because without it the container uses UTC.
 
 ## Your data
 
